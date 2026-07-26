@@ -1,0 +1,182 @@
+//! Shared application state and the authentication extractor.
+
+use std::sync::Arc;
+
+use axum::extract::FromRequestParts;
+use axum::http::request::Parts;
+use tc_core::{Id, IdGen, User};
+use tc_store::Store;
+
+use crate::config::Config;
+use crate::error::{ApiError, ApiResult};
+use crate::hub::Hub;
+use crate::ratelimit::IpLimiter;
+
+pub struct AppState {
+    pub cfg: Config,
+    pub store: Store,
+    pub hub: Hub,
+    pub ids: IdGen,
+    /// Guards the unauthenticated endpoints against credential stuffing.
+    pub login_limiter: IpLimiter,
+    pub started: std::time::Instant,
+}
+
+pub type Shared = Arc<AppState>;
+
+impl AppState {
+    pub fn new(cfg: Config, store: Store) -> AppState {
+        let node = cfg.node_id;
+        let (burst, rate) = (cfg.auth_burst, cfg.auth_per_second);
+        AppState {
+            cfg,
+            store,
+            hub: Hub::new(),
+            ids: IdGen::new(node),
+            // Defaults to ten attempts refilling at one per two seconds:
+            // generous for a person who mistyped, useless for a script. See
+            // `Config::auth_burst` for when raising it is legitimate.
+            login_limiter: IpLimiter::new(burst, rate),
+            started: std::time::Instant::now(),
+        }
+    }
+
+    #[inline]
+    pub fn next_id(&self) -> Id {
+        self.ids.next()
+    }
+
+    /// Run a blocking store operation on the blocking pool.
+    ///
+    /// This is the **only** place `tc_store` is called from, so the "never
+    /// block a reactor thread" rule is enforced in one spot rather than
+    /// remembered at every call site.
+    pub async fn db<T, F>(&self, f: F) -> ApiResult<T>
+    where
+        F: FnOnce(&Store) -> tc_store::Result<T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let store = self.store.clone();
+        tokio::task::spawn_blocking(move || f(&store))
+            .await
+            // A join error means the closure panicked; that is our bug.
+            .map_err(|e| ApiError::Internal(format!("blocking task failed: {e}")))?
+            .map_err(Into::into)
+    }
+}
+
+/// An authenticated request. Extracting this proves the caller holds a live
+/// session; handlers that take it can never accidentally run unauthenticated.
+pub struct Auth(pub User);
+
+impl FromRequestParts<Shared> for Auth {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &Shared,
+    ) -> Result<Self, Self::Rejection> {
+        let token = bearer_token(parts).ok_or(ApiError::Unauthorized)?;
+        let hash = crate::auth::token_hash(&token);
+        let now = tc_core::now_ms();
+
+        let user = state
+            .db(move |s| s.session_user(&hash, now))
+            .await
+            // Any lookup failure is "not authenticated"; distinguishing
+            // expired from forged tells an attacker which tokens are real.
+            .map_err(|_| ApiError::Unauthorized)?;
+        Ok(Auth(user))
+    }
+}
+
+/// Pull a session token from `Authorization: Bearer`, falling back to a cookie.
+///
+/// The cookie form exists for one reason: browsers cannot set headers on a
+/// WebSocket handshake or on a plain `<img src>` for an attachment, so those
+/// two paths need a credential the browser will attach on its own.
+fn bearer_token(parts: &Parts) -> Option<String> {
+    if let Some(v) = parts.headers.get(axum::http::header::AUTHORIZATION)
+        && let Ok(s) = v.to_str()
+        && let Some(rest) = s.strip_prefix("Bearer ")
+    {
+        let t = rest.trim();
+        if !t.is_empty() {
+            return Some(t.to_string());
+        }
+    }
+    let cookies = parts
+        .headers
+        .get(axum::http::header::COOKIE)?
+        .to_str()
+        .ok()?;
+    cookie_value(cookies, "tc_session")
+}
+
+/// Extract one cookie by name from a `Cookie:` header value.
+///
+/// Written out rather than pulled in as a dependency: the format is two
+/// separators, and a cookie jar crate would be more code than this.
+pub fn cookie_value(header: &str, name: &str) -> Option<String> {
+    header.split(';').find_map(|pair| {
+        let (k, v) = pair.split_once('=')?;
+        (k.trim() == name).then(|| v.trim().to_string())
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::{HeaderValue, Request, header};
+
+    fn parts_with(headers: &[(header::HeaderName, &str)]) -> Parts {
+        let mut req = Request::new(());
+        for (k, v) in headers {
+            req.headers_mut()
+                .insert(k.clone(), HeaderValue::from_str(v).unwrap());
+        }
+        req.into_parts().0
+    }
+
+    #[test]
+    fn prefers_the_authorization_header() {
+        let p = parts_with(&[
+            (header::AUTHORIZATION, "Bearer header-token"),
+            (header::COOKIE, "tc_session=cookie-token"),
+        ]);
+        assert_eq!(bearer_token(&p).as_deref(), Some("header-token"));
+    }
+
+    #[test]
+    fn falls_back_to_the_cookie() {
+        let p = parts_with(&[(header::COOKIE, "other=1; tc_session=abc123; x=2")]);
+        assert_eq!(bearer_token(&p).as_deref(), Some("abc123"));
+    }
+
+    #[test]
+    fn rejects_malformed_authorization_values() {
+        for bad in ["", "Bearer", "Bearer ", "Basic abc", "bearer lowercase"] {
+            let p = parts_with(&[(header::AUTHORIZATION, bad)]);
+            assert_eq!(bearer_token(&p), None, "{bad:?} should not authenticate");
+        }
+    }
+
+    #[test]
+    fn no_credentials_at_all_yields_none() {
+        assert_eq!(bearer_token(&parts_with(&[])), None);
+    }
+
+    #[test]
+    fn parses_cookies_with_awkward_spacing() {
+        assert_eq!(
+            cookie_value("a=1;tc_session=t", "tc_session").as_deref(),
+            Some("t")
+        );
+        assert_eq!(
+            cookie_value("  tc_session = t  ", "tc_session").as_deref(),
+            Some("t")
+        );
+        assert_eq!(cookie_value("tc_session_other=t", "tc_session"), None);
+        assert_eq!(cookie_value("novalue", "tc_session"), None);
+    }
+}

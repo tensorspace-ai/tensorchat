@@ -1,0 +1,69 @@
+name: Bug report
+description: Something behaves differently than documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. If this is a **security vulnerability**, please
+        stop and follow [SECURITY.md](https://github.com/tensorspace-ai/tensorchat/blob/main/SECURITY.md)
+        instead — do not file it publicly.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you observed, and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: >
+        Ideally against a fresh `cargo run -p tc-server`. If it only reproduces
+        with particular configuration or data, say so.
+      placeholder: |
+        1. Start the server with …
+        2. Create a channel and …
+        3. Observe …
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Release tag, or `git rev-parse --short HEAD`.
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: OS and architecture, plus `rustc --version` and `node --version`.
+      placeholder: macOS 15 arm64, rustc 1.95.0, node 22.11.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where does it happen
+      options:
+        - Server (Rust)
+        - Web client
+        - Both, or not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: >
+        Server output with `RUST_LOG=tc_server=debug`, and any browser console
+        errors. This is rendered as a code block — no backticks needed.
+      render: text
