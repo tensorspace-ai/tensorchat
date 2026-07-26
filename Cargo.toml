@@ -1,0 +1,32 @@
+[workspace]
+resolver = "3"
+members = ["crates/tc-core", "crates/tc-store", "crates/tc-server"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+# The floor the README promises and CI enforces with a dedicated build job.
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/tensorspace-ai/tensorchat"
+homepage = "https://github.com/tensorspace-ai/tensorchat"
+authors = ["TensorSpace, Inc."]
+keywords = ["chat", "websocket", "sqlite", "realtime"]
+categories = ["web-programming", "network-programming"]
+
+# Release profile tuned for a long-lived server process: one codegen unit and
+# fat LTO buy meaningful throughput in the hot serialize/fanout path.
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+
+# `cargo build --profile bench-fast` — release codegen, but keeps debug symbols
+# so perf/samply traces of the fanout path stay readable.
+[profile.bench-fast]
+inherits = "release"
+panic = "unwind"
+strip = "none"
+debug = 1

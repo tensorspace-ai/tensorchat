@@ -1,0 +1,38 @@
+# Single-node TensorChat.
+#
+#   docker compose up -d
+#
+# Then open http://127.0.0.1:8080. The database and uploads live in the
+# `tensorchat-data` volume; back that up and you have backed up everything.
+
+services:
+  tensorchat:
+    build: .
+    image: ghcr.io/tensorspace-ai/tensorchat:latest
+    restart: unless-stopped
+    # Bound to loopback: put a TLS-terminating reverse proxy in front before
+    # exposing this to a network. Change to "8080:8080" only if something else
+    # already terminates TLS.
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      # Close signups once your team has accounts.
+      TC_OPEN_REGISTRATION: "true"
+      TC_MAX_UPLOAD: "26214400"
+      RUST_LOG: "tc_server=info"
+      # Behind a proxy, every client arrives from the same address, so the
+      # per-address auth limiter needs headroom and the real throttling belongs
+      # at the proxy.
+      # TC_AUTH_BURST: "100"
+      # TC_AUTH_PER_SECOND: "5"
+    volumes:
+      - tensorchat-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--output", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
+
+volumes:
+  tensorchat-data:

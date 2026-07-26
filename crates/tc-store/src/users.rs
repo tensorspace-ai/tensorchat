@@ -1,0 +1,274 @@
+//! Accounts and sessions.
+
+use rusqlite::{OptionalExtension, Row, params};
+use tc_core::{Id, User};
+
+use crate::{Error, Result, Store, from_sql, to_sql};
+
+/// Columns every `User` mapping selects, in the order [`map_user`] expects.
+const USER_COLS: &str = "id, handle, display_name, status, bot, deactivated";
+/// The same list, table-qualified, for queries that join.
+const USER_COLS_Q: &str = "u.id, u.handle, u.display_name, u.status, u.bot, u.deactivated";
+
+fn map_user(row: &Row<'_>) -> rusqlite::Result<User> {
+    Ok(User {
+        id: from_sql(row.get(0)?),
+        handle: row.get(1)?,
+        display_name: row.get(2)?,
+        status: row.get(3)?,
+        bot: row.get(4)?,
+        deactivated: row.get(5)?,
+    })
+}
+
+impl Store {
+    /// Register an account. `password_hash` must already be an Argon2id PHC
+    /// string — this layer never sees a plaintext password.
+    pub fn create_user(
+        &self,
+        id: Id,
+        handle: &str,
+        display_name: &str,
+        password_hash: &str,
+    ) -> Result<User> {
+        let conn = self.conn()?;
+        conn.prepare_cached(
+            "INSERT INTO users (id, handle, display_name, password_hash) VALUES (?, ?, ?, ?)",
+        )?
+        .execute(params![to_sql(id), handle, display_name, password_hash])
+        .map_err(|e| Error::from_sqlite(e, "that handle"))?;
+
+        Ok(User {
+            id,
+            handle: handle.to_string(),
+            display_name: display_name.to_string(),
+            status: String::new(),
+            bot: false,
+            deactivated: false,
+        })
+    }
+
+    /// Fetch a user together with their password hash, for login.
+    ///
+    /// Returns `Ok(None)` for an unknown handle so the caller can still run a
+    /// dummy verification and keep login timing independent of whether the
+    /// account exists.
+    pub fn user_for_login(&self, handle: &str) -> Result<Option<(User, String)>> {
+        let conn = self.conn()?;
+        let row = conn
+            .prepare_cached(&format!(
+                "SELECT {USER_COLS}, password_hash FROM users WHERE handle = ?"
+            ))?
+            .query_row([handle], |r| Ok((map_user(r)?, r.get::<_, String>(6)?)))
+            .optional()?;
+        Ok(row)
+    }
+
+    pub fn user(&self, id: Id) -> Result<User> {
+        let conn = self.conn()?;
+        conn.prepare_cached(&format!("SELECT {USER_COLS} FROM users WHERE id = ?"))?
+            .query_row([to_sql(id)], map_user)
+            .optional()?
+            .ok_or(Error::NotFound)
+    }
+
+    /// Every account in the workspace.
+    ///
+    /// The client needs the full directory to render authors and resolve
+    /// mentions; shipping it once at connect beats N lookups later. A
+    /// multi-thousand-seat deployment would page this.
+    pub fn all_users(&self) -> Result<Vec<User>> {
+        let conn = self.conn()?;
+        let mut stmt =
+            conn.prepare_cached(&format!("SELECT {USER_COLS} FROM users ORDER BY id"))?;
+        let rows = stmt.query_map([], map_user)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Update the mutable parts of a profile. Returns the new state.
+    pub fn update_profile(&self, id: Id, display_name: &str, status: &str) -> Result<User> {
+        let conn = self.conn()?;
+        let n = conn
+            .prepare_cached("UPDATE users SET display_name = ?, status = ? WHERE id = ?")?
+            .execute(params![display_name, status, to_sql(id)])?;
+        if n == 0 {
+            return Err(Error::NotFound);
+        }
+        drop(conn);
+        self.user(id)
+    }
+
+    /// Record a session. `token_hash` is a SHA-256 of the bearer token; the
+    /// token itself is never stored, so a database dump cannot be replayed.
+    pub fn create_session(
+        &self,
+        token_hash: &[u8],
+        user_id: Id,
+        created_at: u64,
+        expires_at: u64,
+    ) -> Result<()> {
+        let conn = self.conn()?;
+        conn.prepare_cached(
+            "INSERT OR REPLACE INTO sessions (token_hash, user_id, created_at, expires_at) \
+             VALUES (?, ?, ?, ?)",
+        )?
+        .execute(params![
+            token_hash,
+            to_sql(user_id),
+            created_at as i64,
+            expires_at as i64
+        ])?;
+        Ok(())
+    }
+
+    /// Resolve a session token hash to its user, rejecting expired sessions and
+    /// deactivated accounts in the same query.
+    pub fn session_user(&self, token_hash: &[u8], now_ms: u64) -> Result<User> {
+        let conn = self.conn()?;
+        conn.prepare_cached(&format!(
+            "SELECT {USER_COLS_Q} FROM sessions s JOIN users u ON u.id = s.user_id \
+             WHERE s.token_hash = ? AND s.expires_at > ? AND u.deactivated = 0"
+        ))?
+        .query_row(params![token_hash, now_ms as i64], map_user)
+        .optional()?
+        .ok_or(Error::NotFound)
+    }
+
+    /// Log out a single session.
+    pub fn delete_session(&self, token_hash: &[u8]) -> Result<()> {
+        let conn = self.conn()?;
+        conn.prepare_cached("DELETE FROM sessions WHERE token_hash = ?")?
+            .execute([token_hash])?;
+        Ok(())
+    }
+
+    /// Drop expired rows. Called on a timer; expiry is already enforced at
+    /// lookup, so this is only reclaiming space.
+    pub fn purge_expired_sessions(&self, now_ms: u64) -> Result<usize> {
+        let conn = self.conn()?;
+        Ok(conn
+            .prepare_cached("DELETE FROM sessions WHERE expires_at <= ?")?
+            .execute([now_ms as i64])?)
+    }
+
+    /// Resolve handles to ids, for turning `@mentions` into mention rows.
+    pub fn ids_for_handles(&self, handles: &[String]) -> Result<Vec<(String, Id)>> {
+        if handles.is_empty() {
+            return Ok(Vec::new());
+        }
+        let conn = self.conn()?;
+        // Bind each handle rather than interpolating, and reuse one prepared
+        // statement across the batch.
+        let mut stmt = conn
+            .prepare_cached("SELECT handle, id FROM users WHERE handle = ? AND deactivated = 0")?;
+        let mut out = Vec::with_capacity(handles.len());
+        for h in handles {
+            if let Some(pair) = stmt
+                .query_row([h], |r| Ok((r.get::<_, String>(0)?, from_sql(r.get(1)?))))
+                .optional()?
+            {
+                out.push(pair);
+            }
+        }
+        Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tc_core::IdGen;
+
+    fn store_with_user() -> (Store, IdGen, User) {
+        let s = Store::open_in_memory().unwrap();
+        let g = IdGen::new(1);
+        let u = s.create_user(g.next(), "alice", "Alice", "hash").unwrap();
+        (s, g, u)
+    }
+
+    #[test]
+    fn creates_and_reads_back_a_user() {
+        let (s, _, u) = store_with_user();
+        assert_eq!(s.user(u.id).unwrap(), u);
+        assert_eq!(s.all_users().unwrap(), vec![u]);
+    }
+
+    #[test]
+    fn duplicate_handle_is_a_conflict_not_a_raw_sqlite_error() {
+        let (s, g, _) = store_with_user();
+        let err = s
+            .create_user(g.next(), "alice", "Other", "hash")
+            .unwrap_err();
+        assert!(matches!(err, Error::Conflict(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn login_lookup_returns_the_hash_and_none_for_unknown() {
+        let (s, _, u) = store_with_user();
+        let (found, hash) = s.user_for_login("alice").unwrap().unwrap();
+        assert_eq!(found.id, u.id);
+        assert_eq!(hash, "hash");
+        assert!(s.user_for_login("nobody").unwrap().is_none());
+    }
+
+    #[test]
+    fn sessions_expire_and_can_be_revoked() {
+        let (s, _, u) = store_with_user();
+        s.create_session(b"hash-a", u.id, 0, 1_000).unwrap();
+
+        assert_eq!(s.session_user(b"hash-a", 500).unwrap().id, u.id);
+        // Past expiry the same token no longer resolves.
+        assert!(matches!(
+            s.session_user(b"hash-a", 1_001),
+            Err(Error::NotFound)
+        ));
+
+        s.create_session(b"hash-b", u.id, 0, 10_000).unwrap();
+        s.delete_session(b"hash-b").unwrap();
+        assert!(matches!(s.session_user(b"hash-b", 1), Err(Error::NotFound)));
+    }
+
+    #[test]
+    fn deactivated_users_cannot_authenticate() {
+        let (s, _, u) = store_with_user();
+        s.create_session(b"tok", u.id, 0, u64::MAX / 2).unwrap();
+        s.conn()
+            .unwrap()
+            .execute(
+                "UPDATE users SET deactivated = 1 WHERE id = ?",
+                [to_sql(u.id)],
+            )
+            .unwrap();
+        assert!(matches!(s.session_user(b"tok", 1), Err(Error::NotFound)));
+    }
+
+    #[test]
+    fn purges_only_expired_sessions() {
+        let (s, _, u) = store_with_user();
+        s.create_session(b"old", u.id, 0, 100).unwrap();
+        s.create_session(b"new", u.id, 0, 10_000).unwrap();
+        assert_eq!(s.purge_expired_sessions(1_000).unwrap(), 1);
+        assert!(s.session_user(b"new", 1_000).is_ok());
+    }
+
+    #[test]
+    fn resolves_handles_to_ids_skipping_unknown() {
+        let (s, g, u) = store_with_user();
+        let bob = s.create_user(g.next(), "bob", "Bob", "h").unwrap();
+        let got = s
+            .ids_for_handles(&["alice".into(), "ghost".into(), "bob".into()])
+            .unwrap();
+        assert_eq!(
+            got,
+            vec![("alice".to_string(), u.id), ("bob".to_string(), bob.id)]
+        );
+    }
+
+    #[test]
+    fn updates_profile() {
+        let (s, _, u) = store_with_user();
+        let updated = s.update_profile(u.id, "Alice A.", "on vacation").unwrap();
+        assert_eq!(updated.display_name, "Alice A.");
+        assert_eq!(updated.status, "on vacation");
+    }
+}

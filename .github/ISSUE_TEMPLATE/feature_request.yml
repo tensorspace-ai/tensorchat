@@ -1,0 +1,48 @@
+name: Feature request
+description: Suggest something TensorChat should do
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing, please check the
+        [Limitations](https://github.com/tensorspace-ai/tensorchat#limitations)
+        section of the README — clustering, multi-tenancy, voice, and bridges
+        are known gaps rather than oversights, though discussion of how to
+        close them is welcome.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: >
+        What are you trying to do that you cannot do today? Describe the
+        situation, not the solution — it is the part that is hardest to
+        reconstruct later.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+      description: If you have a specific design or API in mind, sketch it here.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Including working around it outside TensorChat.
+
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Design constraints
+      description: >
+        These are load-bearing (see
+        [CONTRIBUTING.md](https://github.com/tensorspace-ai/tensorchat/blob/main/CONTRIBUTING.md#design-constraints)).
+        A proposal that conflicts with one needs to say how it resolves it.
+      options:
+        - label: This does not require a per-recipient field in a broadcast frame
+        - label: This does not add a runtime dependency to the web client
+        - label: I would be willing to help implement this

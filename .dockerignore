@@ -1,0 +1,25 @@
+# Build artifacts — the image builds its own.
+target/
+web/dist/
+web/node_modules/
+
+# Runtime state must never end up in an image.
+*.db
+*.db-wal
+*.db-shm
+blobs/
+
+.git/
+.github/
+.gitignore
+.dockerignore
+Dockerfile
+docker-compose.yml
+
+*.md
+tools/
+
+.DS_Store
+.idea/
+.vscode/
+*.swp

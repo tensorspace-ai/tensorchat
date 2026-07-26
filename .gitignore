@@ -1,0 +1,21 @@
+# Rust
+/target/
+
+# Frontend
+node_modules/
+web/dist/
+
+# Runtime state — created on first run, never committed
+*.db
+*.db-wal
+*.db-shm
+/blobs/
+*.log
+.env
+.env.*
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
