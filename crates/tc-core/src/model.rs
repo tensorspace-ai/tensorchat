@@ -26,6 +26,10 @@ pub struct User {
     pub bot: bool,
     #[serde(rename = "d", default, skip_serializing_if = "is_false")]
     pub deactivated: bool,
+    /// Workspace administrator. Not a secret — clients show an admin badge and
+    /// reveal admin-only controls — so it travels on the ordinary `User`.
+    #[serde(rename = "adm", default, skip_serializing_if = "is_false")]
+    pub admin: bool,
 }
 
 /// Live connection state. Derived from the hub, never persisted.

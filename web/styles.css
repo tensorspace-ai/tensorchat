@@ -2105,6 +2105,69 @@ dialog::backdrop {
   background: var(--border);
 }
 
+/* One person in the manage-people list. */
+.manage-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+}
+
+.manage-row:hover {
+  background: var(--hover);
+}
+
+/* Dimmed, not hidden: a deactivated account still has to be findable to be
+   reactivated. */
+.manage-row.deactivated .person-main {
+  opacity: 0.55;
+}
+
+.badge {
+  flex: none;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+.badge.muted-badge {
+  background: var(--hover-strong);
+  color: var(--text-muted);
+}
+
+.manage-action {
+  flex: none;
+  padding: 4px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.manage-action:hover:not(:disabled) {
+  background: var(--hover-strong);
+  color: var(--text);
+}
+
+.manage-action.danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+
+.manage-action:disabled {
+  opacity: 0.4;
+}
+
 .modal-section {
   color: var(--text);
   font-size: 14.5px;

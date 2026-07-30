@@ -26,6 +26,7 @@ export type User = {
   st?: string; // status text
   bot?: boolean;
   d?: boolean; // deactivated
+  adm?: boolean; // workspace administrator
 };
 
 export type Channel = {

@@ -106,6 +106,14 @@ export const api = {
 
   users: () => request<User[]>('GET', '/api/users'),
 
+  /**
+   * Administer another account: grant or revoke administrator, deactivate or
+   * reactivate. Administrators only; the server refuses either change applied
+   * to yourself, so a workspace cannot end up with nobody who can administer it.
+   */
+  adminUpdateUser: (id: Id, patch: { admin?: boolean; deactivated?: boolean }) =>
+    request<User>('PATCH', `/api/admin/users/${id}`, patch),
+
   channels: () => request<Channel[]>('GET', '/api/channels'),
 
   browseChannels: () => request<Channel[]>('GET', '/api/channels/browse'),

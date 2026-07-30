@@ -33,6 +33,10 @@ resynchronization.
 across devices, pinned and saved messages, per-channel mute, and full-text
 search with highlighted snippets, scoped to the channels you belong to.
 
+**Administration** — the first account is an administrator, and can promote
+others or deactivate accounts. Deactivation signs the account out everywhere and
+blocks sign-in while leaving its messages, mentions and threads intact.
+
 **Client** — virtual-scrolled history that stays smooth over a hundred thousand
 messages, optimistic sending, per-channel drafts, mention autocomplete, drag-drop
 and paste-to-upload, opt-in desktop notifications, a light and dark theme, and
@@ -77,8 +81,17 @@ cd web && npm install && npm run build && cd ..
 cargo run --release -p tc-server
 ```
 
-Open <http://127.0.0.1:8080> and create an account. The first thing to do is
-make a channel.
+Open <http://127.0.0.1:8080> and create an account. The first account to
+register becomes the workspace administrator. The first thing to do is make a
+channel.
+
+Upgrading an existing deployment does *not* pick an administrator for you —
+promoting an arbitrary account would be a surprising grant of privilege. Choose
+one deliberately:
+
+```sh
+sqlite3 tensorchat.db "UPDATE users SET admin = 1 WHERE handle = 'you';"
+```
 
 The database (`tensorchat.db`) and uploads (`blobs/`) are created on first run.
 Nothing else is needed — no migration step to run, no services to start. Later

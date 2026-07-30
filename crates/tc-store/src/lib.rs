@@ -46,7 +46,7 @@ pub use saved::MAX_SAVED_PAGE;
 pub use search::SearchQuery;
 
 /// Schema version embedded in the database via `PRAGMA user_version`.
-const SCHEMA_VERSION: i32 = 4;
+const SCHEMA_VERSION: i32 = 5;
 
 /// Incremental upgrades, each paired with the version it produces.
 ///
@@ -68,6 +68,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (2, include_str!("migrations/002_pins.sql")),
     (3, include_str!("migrations/003_saved.sql")),
     (4, include_str!("migrations/004_mute.sql")),
+    (5, include_str!("migrations/005_admin.sql")),
 ];
 
 pub type Result<T> = std::result::Result<T, Error>;

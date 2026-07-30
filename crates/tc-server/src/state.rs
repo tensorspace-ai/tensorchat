@@ -90,6 +90,28 @@ impl FromRequestParts<Shared> for Auth {
     }
 }
 
+/// An authenticated request from a workspace administrator.
+///
+/// A separate extractor rather than a check inside each handler, for the same
+/// reason [`Auth`] exists: a route that takes this cannot accidentally run
+/// without the privilege, and the check cannot be forgotten in a new handler.
+pub struct AdminAuth(pub User);
+
+impl FromRequestParts<Shared> for AdminAuth {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &Shared,
+    ) -> Result<Self, Self::Rejection> {
+        let Auth(user) = Auth::from_request_parts(parts, state).await?;
+        if !user.admin {
+            return Err(ApiError::Forbidden);
+        }
+        Ok(AdminAuth(user))
+    }
+}
+
 /// Pull a session token from `Authorization: Bearer`, falling back to a cookie.
 ///
 /// The cookie form exists for one reason: browsers cannot set headers on a

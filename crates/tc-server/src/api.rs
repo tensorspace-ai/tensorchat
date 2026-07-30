@@ -24,7 +24,7 @@ use tc_store::SearchQuery;
 use crate::auth;
 use crate::error::{ApiError, ApiResult};
 use crate::service;
-use crate::state::{Auth, Shared};
+use crate::state::{AdminAuth, Auth, Shared};
 
 pub fn routes() -> Router<Shared> {
     Router::new()
@@ -35,6 +35,7 @@ pub fn routes() -> Router<Shared> {
         .route("/api/me/password", post(change_password))
         .route("/api/me/sessions", delete(revoke_other_sessions))
         .route("/api/users", get(list_users))
+        .route("/api/admin/users/{id}", patch(admin_update_user))
         .route("/api/channels", get(my_channels).post(create_channel))
         .route("/api/channels/browse", get(browse_channels))
         .route("/api/channels/{id}", patch(update_channel))
@@ -302,6 +303,65 @@ async fn update_me(
 
 async fn list_users(State(st): State<Shared>, Auth(_): Auth) -> ApiResult<Json<Vec<User>>> {
     Ok(Json(st.db(|s| s.all_users()).await?))
+}
+
+// ---------------------------------------------------------------- admin
+
+#[derive(Deserialize)]
+pub struct AdminUpdateUserReq {
+    /// Grant or revoke administrator.
+    admin: Option<bool>,
+    /// Deactivate or reactivate the account.
+    deactivated: Option<bool>,
+}
+
+/// Administer another account.
+///
+/// Deactivation rather than deletion: the row stays, so authorship, mentions
+/// and thread structure survive. Deleting an account outright would cascade its
+/// messages away and rewrite other people's conversations.
+async fn admin_update_user(
+    State(st): State<Shared>,
+    AdminAuth(actor): AdminAuth,
+    Path(id): Path<Id>,
+    Json(req): Json<AdminUpdateUserReq>,
+) -> ApiResult<Json<User>> {
+    // Losing every administrator is the one state the API cannot recover from
+    // — there would be nobody left who could grant the privilege back. So an
+    // administrator may not strip their own, and may not deactivate
+    // themselves; someone else has to do it.
+    if id == actor.id && (req.admin == Some(false) || req.deactivated == Some(true)) {
+        return Err(ApiError::BadRequest(
+            "another administrator has to do that to you".into(),
+        ));
+    }
+
+    let mut updated = st.db(move |s| s.user(id)).await?;
+    if let Some(admin) = req.admin {
+        updated = st.db(move |s| s.set_admin(id, admin)).await?;
+    }
+    if let Some(deactivated) = req.deactivated {
+        updated = st.db(move |s| s.set_deactivated(id, deactivated)).await?;
+        if deactivated {
+            // A session is a bearer token that would otherwise keep working
+            // until it expired. `session_user` already refuses deactivated
+            // accounts, but leaving the rows behind would silently reactivate
+            // every one of their devices if the account were ever restored.
+            st.db(move |s| s.delete_sessions_for_user(id, None)).await?;
+        }
+    }
+
+    // Everyone renders this user; a deactivation or a new admin badge should
+    // appear without a reload.
+    for u in st.hub.online_users() {
+        st.hub.send_to_user(
+            u,
+            &tc_core::ServerFrame::UserUpd {
+                user: updated.clone(),
+            },
+        );
+    }
+    Ok(Json(updated))
 }
 
 // ---------------------------------------------------------------- channels

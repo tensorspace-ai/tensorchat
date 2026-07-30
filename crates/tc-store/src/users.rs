@@ -1,14 +1,14 @@
 //! Accounts and sessions.
 
-use rusqlite::{OptionalExtension, Row, params};
+use rusqlite::{OptionalExtension, Row, TransactionBehavior, params};
 use tc_core::{Id, User};
 
 use crate::{Error, Result, Store, from_sql, to_sql};
 
 /// Columns every `User` mapping selects, in the order [`map_user`] expects.
-const USER_COLS: &str = "id, handle, display_name, status, bot, deactivated";
+const USER_COLS: &str = "id, handle, display_name, status, bot, deactivated, admin";
 /// The same list, table-qualified, for queries that join.
-const USER_COLS_Q: &str = "u.id, u.handle, u.display_name, u.status, u.bot, u.deactivated";
+const USER_COLS_Q: &str = "u.id, u.handle, u.display_name, u.status, u.bot, u.deactivated, u.admin";
 
 fn map_user(row: &Row<'_>) -> rusqlite::Result<User> {
     Ok(User {
@@ -18,12 +18,17 @@ fn map_user(row: &Row<'_>) -> rusqlite::Result<User> {
         status: row.get(3)?,
         bot: row.get(4)?,
         deactivated: row.get(5)?,
+        admin: row.get(6)?,
     })
 }
 
 impl Store {
     /// Register an account. `password_hash` must already be an Argon2id PHC
     /// string — this layer never sees a plaintext password.
+    ///
+    /// The very first account created becomes the administrator. Somebody has
+    /// to be, and every other bootstrapping route is worse: a setup token to
+    /// mislay, a config flag to forget, or a workspace nobody can administer.
     pub fn create_user(
         &self,
         id: Id,
@@ -31,12 +36,29 @@ impl Store {
         display_name: &str,
         password_hash: &str,
     ) -> Result<User> {
-        let conn = self.conn()?;
-        conn.prepare_cached(
-            "INSERT INTO users (id, handle, display_name, password_hash) VALUES (?, ?, ?, ?)",
+        let mut conn = self.conn()?;
+        // IMMEDIATE: "is this the first user?" is a read that decides a write,
+        // so two simultaneous registrations must not both see an empty table
+        // and both claim the admin flag.
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+
+        let first: bool = tx
+            .prepare_cached("SELECT NOT EXISTS (SELECT 1 FROM users)")?
+            .query_row([], |r| r.get(0))?;
+
+        tx.prepare_cached(
+            "INSERT INTO users (id, handle, display_name, password_hash, admin) \
+             VALUES (?, ?, ?, ?, ?)",
         )?
-        .execute(params![to_sql(id), handle, display_name, password_hash])
+        .execute(params![
+            to_sql(id),
+            handle,
+            display_name,
+            password_hash,
+            first
+        ])
         .map_err(|e| Error::from_sqlite(e, "that handle"))?;
+        tx.commit()?;
 
         Ok(User {
             id,
@@ -45,21 +67,66 @@ impl Store {
             status: String::new(),
             bot: false,
             deactivated: false,
+            admin: first,
         })
+    }
+
+    /// How many administrators the workspace has.
+    ///
+    /// Used to refuse the last one's own demotion or deactivation — a
+    /// workspace with no administrator cannot recover through the API.
+    pub fn admin_count(&self) -> Result<u32> {
+        let conn = self.conn()?;
+        Ok(conn
+            .prepare_cached("SELECT count(*) FROM users WHERE admin = 1 AND deactivated = 0")?
+            .query_row([], |r| r.get::<_, i64>(0))? as u32)
+    }
+
+    /// Grant or revoke administrator. Returns the updated user.
+    pub fn set_admin(&self, id: Id, admin: bool) -> Result<User> {
+        let conn = self.conn()?;
+        let n = conn
+            .prepare_cached("UPDATE users SET admin = ? WHERE id = ?")?
+            .execute(params![admin, to_sql(id)])?;
+        if n == 0 {
+            return Err(Error::NotFound);
+        }
+        drop(conn);
+        self.user(id)
+    }
+
+    /// Deactivate or reactivate an account. Returns the updated user.
+    ///
+    /// Deactivation is reversible and keeps the row, so authorship, mentions
+    /// and thread structure all stay intact. Deleting the account outright
+    /// would cascade its messages away and rewrite other people's history.
+    pub fn set_deactivated(&self, id: Id, deactivated: bool) -> Result<User> {
+        let conn = self.conn()?;
+        let n = conn
+            .prepare_cached("UPDATE users SET deactivated = ? WHERE id = ?")?
+            .execute(params![deactivated, to_sql(id)])?;
+        if n == 0 {
+            return Err(Error::NotFound);
+        }
+        drop(conn);
+        self.user(id)
     }
 
     /// Fetch a user together with their password hash, for login.
     ///
-    /// Returns `Ok(None)` for an unknown handle so the caller can still run a
-    /// dummy verification and keep login timing independent of whether the
-    /// account exists.
+    /// Returns `Ok(None)` for an unknown handle *or a deactivated account*, so
+    /// the caller can still run a dummy verification and keep login timing —
+    /// and its answer — independent of which of the two it was. Filtering here
+    /// rather than after the password check is what keeps deactivation from
+    /// being detectable by response timing.
     pub fn user_for_login(&self, handle: &str) -> Result<Option<(User, String)>> {
         let conn = self.conn()?;
         let row = conn
             .prepare_cached(&format!(
-                "SELECT {USER_COLS}, password_hash FROM users WHERE handle = ?"
+                "SELECT {USER_COLS}, password_hash FROM users \
+                 WHERE handle = ? AND deactivated = 0"
             ))?
-            .query_row([handle], |r| Ok((map_user(r)?, r.get::<_, String>(6)?)))
+            .query_row([handle], |r| Ok((map_user(r)?, r.get::<_, String>(7)?)))
             .optional()?;
         Ok(row)
     }
@@ -338,6 +405,73 @@ mod tests {
         // No exemption revokes everything, including the caller's.
         assert_eq!(s.delete_sessions_for_user(u.id, None).unwrap(), 1);
         assert!(s.session_user(b"tok-b", 1).is_err());
+    }
+
+    #[test]
+    fn the_first_account_is_an_administrator_and_later_ones_are_not() {
+        // Somebody has to be, or the workspace can never have one.
+        let (s, g, first) = store_with_user();
+        assert!(first.admin);
+        assert_eq!(s.admin_count().unwrap(), 1);
+
+        let second = s.create_user(g.next(), "bob", "Bob", "h").unwrap();
+        assert!(!second.admin);
+        assert_eq!(s.admin_count().unwrap(), 1);
+        // And it round-trips through a read, not just the returned value.
+        assert!(s.user(first.id).unwrap().admin);
+    }
+
+    #[test]
+    fn admin_can_be_granted_and_revoked() {
+        let (s, g, _) = store_with_user();
+        let bob = s.create_user(g.next(), "bob", "Bob", "h").unwrap();
+
+        assert!(s.set_admin(bob.id, true).unwrap().admin);
+        assert_eq!(s.admin_count().unwrap(), 2);
+        assert!(!s.set_admin(bob.id, false).unwrap().admin);
+        assert_eq!(s.admin_count().unwrap(), 1);
+    }
+
+    #[test]
+    fn deactivation_is_reversible_and_blocks_login() {
+        let (s, g, _) = store_with_user();
+        let bob = s.create_user(g.next(), "bob", "Bob", "h").unwrap();
+        s.create_session(b"bobs-token", bob.id, 0, u64::MAX / 2)
+            .unwrap();
+
+        assert!(s.user_for_login("bob").unwrap().is_some());
+
+        let off = s.set_deactivated(bob.id, true).unwrap();
+        assert!(off.deactivated);
+        // Login is refused at the lookup, not after the password check, so a
+        // deactivated account is indistinguishable from an unknown one.
+        assert!(s.user_for_login("bob").unwrap().is_none());
+        assert!(s.session_user(b"bobs-token", 1).is_err());
+        // The row survives, so authorship and thread structure are intact.
+        assert_eq!(s.user(bob.id).unwrap().handle, "bob");
+
+        assert!(!s.set_deactivated(bob.id, false).unwrap().deactivated);
+        assert!(s.user_for_login("bob").unwrap().is_some());
+    }
+
+    #[test]
+    fn a_deactivated_administrator_does_not_count_toward_the_admin_total() {
+        // Otherwise the "do not remove the last admin" guard would be satisfied
+        // by an administrator who cannot sign in.
+        let (s, _, first) = store_with_user();
+        assert_eq!(s.admin_count().unwrap(), 1);
+        s.set_deactivated(first.id, true).unwrap();
+        assert_eq!(s.admin_count().unwrap(), 0);
+    }
+
+    #[test]
+    fn administering_an_unknown_account_is_not_found() {
+        let (s, _, _) = store_with_user();
+        assert!(matches!(s.set_admin(Id(4242), true), Err(Error::NotFound)));
+        assert!(matches!(
+            s.set_deactivated(Id(4242), true),
+            Err(Error::NotFound)
+        ));
     }
 
     #[test]

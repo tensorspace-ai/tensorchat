@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Administrators** — the first account to register becomes one, and can
+  promote others or deactivate accounts via `PATCH /api/admin/users/{id}` and a
+  "Manage people" dialog. `User.deactivated` existed in the model but nothing
+  had ever set it.
 - **Emoji picker and `:shortcode:` completion** — a searchable picker on the
   composer and the message hover bar, and inline completion sharing the
   mention popover. Shortcodes expand on send, so what is stored is the emoji.
@@ -41,6 +45,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Login no longer succeeds for a deactivated account. It previously issued a
+  token that then failed on every authenticated request, because `session_user`
+  filtered deactivated accounts but `user_for_login` did not.
 - Leaving or being removed from a channel now drops the hub subscription as well
   as the membership row. A subscription used to outlive membership until the
   socket reconnected, so a departed member kept receiving a private channel's

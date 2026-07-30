@@ -318,6 +318,97 @@ export function addMembersDialog(
   search.focus();
 }
 
+/**
+ * Administer accounts: grant or revoke administrator, deactivate or reactivate.
+ *
+ * Deactivation rather than deletion — the account's messages, mentions and
+ * thread structure stay intact, which is why the copy says "deactivate" and
+ * never "delete".
+ */
+export function manageUsersDialog(store: Store): void {
+  const list = el('div', { class: 'modal-list' });
+  const error = errorLine();
+  const search = el('input', {
+    class: 'modal-input',
+    placeholder: 'Find people…',
+    'aria-label': 'Find people',
+  }) as HTMLInputElement;
+
+  dialog(
+    'Manage people',
+    el('p', {
+      class: 'modal-hint',
+      text: 'Deactivating an account signs it out everywhere and blocks sign-in. Its messages stay where they are.',
+    }),
+    search,
+    list,
+    error,
+  );
+
+  const meId = store.me()?.id;
+
+  const apply = async (user: User, patch: { admin?: boolean; deactivated?: boolean }) => {
+    try {
+      const updated = await api.adminUpdateUser(user.id, patch);
+      // The server also broadcasts a `user_upd`, but folding the response in
+      // directly means the row redraws without waiting for the round trip.
+      store.users.update((prev) => new Map(prev).set(updated.id, updated));
+      error.hidden = true;
+      render();
+    } catch (err) {
+      showError(error, err);
+    }
+  };
+
+  const render = () => {
+    const q = search.value.trim().toLowerCase();
+    const people = [...store.users().values()]
+      .filter((u) => !q || u.h.includes(q) || u.n.toLowerCase().includes(q))
+      .sort((a, b) => (a.n || a.h).localeCompare(b.n || b.h));
+
+    replace(
+      list,
+      people.map((u: User) => {
+        // The server refuses both of these applied to yourself, so that a
+        // workspace cannot end up with nobody able to administer it. Reflect
+        // that here rather than offering a button that always fails.
+        const isMe = u.id === meId;
+        return el(
+          'div',
+          { class: `manage-row${u.d ? ' deactivated' : ''}` },
+          avatar(u.id, u.n || u.h, 28),
+          el(
+            'span',
+            { class: 'person-main' },
+            el('span', { class: 'person-name', text: u.n || u.h }),
+            el('span', { class: 'person-handle', text: `@${u.h}` }),
+          ),
+          u.adm ? el('span', { class: 'badge', text: 'ADMIN' }) : null,
+          u.d ? el('span', { class: 'badge muted-badge', text: 'INACTIVE' }) : null,
+          el('button', {
+            class: 'manage-action',
+            text: u.adm ? 'Revoke admin' : 'Make admin',
+            disabled: isMe,
+            title: isMe ? 'Another administrator has to change your own role' : '',
+            on: { click: () => void apply(u, { admin: !u.adm }) },
+          }),
+          el('button', {
+            class: `manage-action${u.d ? '' : ' danger'}`,
+            text: u.d ? 'Reactivate' : 'Deactivate',
+            disabled: isMe,
+            title: isMe ? 'Another administrator has to deactivate you' : '',
+            on: { click: () => void apply(u, { deactivated: !u.d }) },
+          }),
+        );
+      }),
+    );
+  };
+
+  search.addEventListener('input', render);
+  render();
+  search.focus();
+}
+
 export function preferencesDialog(
   store: Store,
   notifier: Notifier,
@@ -395,6 +486,24 @@ export function preferencesDialog(
     status,
     error,
     submit,
+
+    // Only administrators see this, and the server enforces the same rule —
+    // hiding the button is a courtesy, not the check.
+    me.adm
+      ? el('hr', { class: 'modal-divider' })
+      : null,
+    me.adm
+      ? el('button', {
+          class: 'modal-secondary',
+          text: 'Manage people',
+          on: {
+            click: () => {
+              d.close();
+              manageUsersDialog(store);
+            },
+          },
+        })
+      : null,
 
     el('hr', { class: 'modal-divider' }),
     el('h3', { class: 'modal-section', text: 'Notifications' }),

@@ -1,4 +1,4 @@
--- TensorChat schema (version 4).
+-- TensorChat schema (version 5).
 --
 -- Conventions:
 --   * Every `id` is a Snowflake (see tc-core::id). Because they are monotonic,
@@ -19,7 +19,11 @@ CREATE TABLE users (
     -- Argon2id PHC string. Never leaves the store layer.
     password_hash TEXT    NOT NULL,
     bot           INTEGER NOT NULL DEFAULT 0,
-    deactivated   INTEGER NOT NULL DEFAULT 0
+    deactivated   INTEGER NOT NULL DEFAULT 0,
+    -- A flag, not a roles table: there is one privilege level above "member"
+    -- and one workspace per deployment. Per-channel roles, if they ever exist,
+    -- belong on `members` rather than here.
+    admin         INTEGER NOT NULL DEFAULT 0
 ) STRICT;
 
 -- Handles are the @mention namespace, so uniqueness is a correctness

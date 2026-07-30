@@ -405,6 +405,164 @@ async fn one_users_password_change_leaves_everyone_else_signed_in() {
 }
 
 #[tokio::test]
+async fn the_first_account_is_an_administrator() {
+    let app = App::new();
+    let (alice, _) = app.account("alice").await;
+    let (bob, _) = app.account("bob").await;
+
+    let (_, me) = app.send("GET", "/api/me", Some(&alice), None).await;
+    assert_eq!(me["adm"], true);
+
+    let (_, me) = app.send("GET", "/api/me", Some(&bob), None).await;
+    assert!(!me["adm"].as_bool().unwrap_or(false));
+}
+
+#[tokio::test]
+async fn only_administrators_can_administer() {
+    let app = App::new();
+    app.account("alice").await;
+    let (bob, bob_id) = app.account("bob").await;
+    let (_, carol_id) = app.account("carol").await;
+
+    for (target, body) in [
+        (&bob_id, json!({ "admin": true })),
+        (&carol_id, json!({ "deactivated": true })),
+    ] {
+        let (status, _) = app
+            .send(
+                "PATCH",
+                &format!("/api/admin/users/{target}"),
+                Some(&bob),
+                Some(body),
+            )
+            .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+}
+
+#[tokio::test]
+async fn deactivating_an_account_ends_its_sessions_and_blocks_login() {
+    let app = App::new();
+    let (alice, _) = app.account("alice").await;
+    let (bob, bob_id) = app.account("bob").await;
+
+    let (status, user) = app
+        .send(
+            "PATCH",
+            &format!("/api/admin/users/{bob_id}"),
+            Some(&alice),
+            Some(json!({ "deactivated": true })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(user["d"], true);
+
+    // The live session stops working immediately, rather than lingering until
+    // its month-long expiry.
+    let (status, _) = app.send("GET", "/api/me", Some(&bob), None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // And a fresh login is refused, rather than handing out a token that would
+    // fail on every subsequent request.
+    let (status, _) = app
+        .send(
+            "POST",
+            "/api/login",
+            None,
+            Some(json!({ "handle": "bob", "password": "correct horse battery" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // Reversible, and the account is intact.
+    let (status, user) = app
+        .send(
+            "PATCH",
+            &format!("/api/admin/users/{bob_id}"),
+            Some(&alice),
+            Some(json!({ "deactivated": false })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!user["d"].as_bool().unwrap_or(false));
+
+    let (status, _) = app
+        .send(
+            "POST",
+            "/api/login",
+            None,
+            Some(json!({ "handle": "bob", "password": "correct horse battery" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn an_administrator_cannot_lock_the_workspace_out_of_itself() {
+    let app = App::new();
+    let (alice, alice_id) = app.account("alice").await;
+
+    // Losing every administrator is unrecoverable through the API — there
+    // would be nobody left who could grant the privilege back.
+    for body in [json!({ "admin": false }), json!({ "deactivated": true })] {
+        let (status, _) = app
+            .send(
+                "PATCH",
+                &format!("/api/admin/users/{alice_id}"),
+                Some(&alice),
+                Some(body.clone()),
+            )
+            .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "for {body}");
+    }
+
+    let (_, me) = app.send("GET", "/api/me", Some(&alice), None).await;
+    assert_eq!(me["adm"], true, "still an administrator");
+}
+
+#[tokio::test]
+async fn a_promoted_user_can_then_administer() {
+    let app = App::new();
+    let (alice, _) = app.account("alice").await;
+    let (bob, bob_id) = app.account("bob").await;
+    let (_, carol_id) = app.account("carol").await;
+
+    let (status, user) = app
+        .send(
+            "PATCH",
+            &format!("/api/admin/users/{bob_id}"),
+            Some(&alice),
+            Some(json!({ "admin": true })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(user["adm"], true);
+
+    let (status, _) = app
+        .send(
+            "PATCH",
+            &format!("/api/admin/users/{carol_id}"),
+            Some(&bob),
+            Some(json!({ "deactivated": true })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // With a second administrator in place, the first may now step down.
+    let (_, alice_me) = app.send("GET", "/api/me", Some(&alice), None).await;
+    let alice_id = alice_me["id"].as_str().unwrap();
+    let (status, _) = app
+        .send(
+            "PATCH",
+            &format!("/api/admin/users/{alice_id}"),
+            Some(&bob),
+            Some(json!({ "admin": false })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "someone else may demote her");
+}
+
+#[tokio::test]
 async fn registration_can_be_closed() {
     let cfg = Config {
         open_registration: false,
