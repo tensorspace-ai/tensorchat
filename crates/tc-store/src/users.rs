@@ -26,9 +26,14 @@ impl Store {
     /// Register an account. `password_hash` must already be an Argon2id PHC
     /// string — this layer never sees a plaintext password.
     ///
-    /// The very first account created becomes the administrator. Somebody has
+    /// The first *person* to register becomes the administrator. Somebody has
     /// to be, and every other bootstrapping route is worse: a setup token to
     /// mislay, a config flag to forget, or a workspace nobody can administer.
+    ///
+    /// Bots are excluded from that count deliberately. They cannot sign in, so
+    /// a bot created before the first human would otherwise consume the
+    /// bootstrap slot and leave the workspace with no administrator and no way
+    /// to appoint one.
     pub fn create_user(
         &self,
         id: Id,
@@ -43,7 +48,7 @@ impl Store {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
 
         let first: bool = tx
-            .prepare_cached("SELECT NOT EXISTS (SELECT 1 FROM users)")?
+            .prepare_cached("SELECT NOT EXISTS (SELECT 1 FROM users WHERE bot = 0)")?
             .query_row([], |r| r.get(0))?;
 
         tx.prepare_cached(

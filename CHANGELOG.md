@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Bots and API tokens** — administrators create bot accounts and mint
+  long-lived tokens for them. A token authenticates the whole HTTP API as a
+  bearer credential, and `POST /api/hooks/{token}` posts for senders that
+  cannot set headers. A bot reaches exactly the channels it is a member of.
 - **Jump to a message** — search hits, saved items and permalinks open the
   channel positioned on the message, via `?around=` on the history endpoint.
   A "Copy link to message" action produces `#/c/{channel}/{message}` links, and

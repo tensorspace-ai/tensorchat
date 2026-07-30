@@ -9,7 +9,16 @@
  * `<img>` requests for attachments, neither of which can carry a header.
  */
 
-import type { Attachment, Channel, Id, Message, ReadState, SearchHit, User } from './protocol.ts';
+import type {
+  ApiToken,
+  Attachment,
+  Channel,
+  Id,
+  Message,
+  ReadState,
+  SearchHit,
+  User,
+} from './protocol.ts';
 
 export class ApiError extends Error {
   status: number;
@@ -113,6 +122,22 @@ export const api = {
    */
   adminUpdateUser: (id: Id, patch: { admin?: boolean; deactivated?: boolean }) =>
     request<User>('PATCH', `/api/admin/users/${id}`, patch),
+
+  bots: () => request<User[]>('GET', '/api/admin/bots'),
+
+  createBot: (handle: string, displayName: string) =>
+    request<User>('POST', '/api/admin/bots', { handle, display_name: displayName }),
+
+  botTokens: (botId: Id) => request<ApiToken[]>('GET', `/api/admin/bots/${botId}/tokens`),
+
+  /**
+   * Mint a token. The `secret` comes back **only here** — nothing stored
+   * server-side can reconstruct it, so a lost token is reissued, not recovered.
+   */
+  createBotToken: (botId: Id, label: string) =>
+    request<ApiToken>('POST', `/api/admin/bots/${botId}/tokens`, { label }),
+
+  revokeBotToken: (tokenId: Id) => request<void>('DELETE', `/api/admin/tokens/${tokenId}`),
 
   channels: () => request<Channel[]>('GET', '/api/channels'),
 

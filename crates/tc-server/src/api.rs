@@ -36,6 +36,13 @@ pub fn routes() -> Router<Shared> {
         .route("/api/me/sessions", delete(revoke_other_sessions))
         .route("/api/users", get(list_users))
         .route("/api/admin/users/{id}", patch(admin_update_user))
+        .route("/api/admin/bots", get(list_bots).post(create_bot))
+        .route(
+            "/api/admin/bots/{id}/tokens",
+            get(list_bot_tokens).post(create_bot_token),
+        )
+        .route("/api/admin/tokens/{id}", delete(revoke_bot_token))
+        .route("/api/hooks/{token}", post(incoming_hook))
         .route("/api/channels", get(my_channels).post(create_channel))
         .route("/api/channels/browse", get(browse_channels))
         .route("/api/channels/{id}", patch(update_channel))
@@ -362,6 +369,166 @@ async fn admin_update_user(
         );
     }
     Ok(Json(updated))
+}
+
+// ---------------------------------------------------------------- bots
+
+#[derive(Deserialize)]
+pub struct CreateBotReq {
+    handle: String,
+    display_name: Option<String>,
+}
+
+/// Create a bot account.
+///
+/// A bot is an ordinary user with no usable password, so everything downstream
+/// — mentions, channel membership, message authorship — applies to it with no
+/// special case. Membership is also what contains it: a bot can reach exactly
+/// the channels it has been added to.
+async fn create_bot(
+    State(st): State<Shared>,
+    AdminAuth(_): AdminAuth,
+    Json(req): Json<CreateBotReq>,
+) -> ApiResult<Json<User>> {
+    let handle = text::normalize_handle(&req.handle).into_owned();
+    text::validate_handle(&handle).map_err(|e| ApiError::BadRequest(e.into()))?;
+
+    let display = req.display_name.unwrap_or_else(|| handle.clone());
+    if display.trim().is_empty() || display.chars().count() > text::MAX_DISPLAY_NAME_LEN {
+        return Err(ApiError::BadRequest("invalid display name".into()));
+    }
+
+    let id = st.next_id();
+    let bot = st.db(move |s| s.create_bot(id, &handle, &display)).await?;
+
+    // Everyone renders the user directory; a new bot should be mentionable
+    // without a reload.
+    for u in st.hub.online_users() {
+        st.hub
+            .send_to_user(u, &tc_core::ServerFrame::UserUpd { user: bot.clone() });
+    }
+    Ok(Json(bot))
+}
+
+async fn list_bots(
+    State(st): State<Shared>,
+    AdminAuth(_): AdminAuth,
+) -> ApiResult<Json<Vec<User>>> {
+    Ok(Json(st.db(|s| s.bots()).await?))
+}
+
+#[derive(Serialize)]
+pub struct TokenRes {
+    id: Id,
+    label: String,
+    created_at: u64,
+    last_used: Option<u64>,
+    /// Present **only** in the response that creates the token. Nothing stored
+    /// server-side can reconstruct it, so a lost token is reissued, not
+    /// recovered.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    secret: Option<String>,
+}
+
+fn token_res(t: tc_store::ApiToken, secret: Option<String>) -> TokenRes {
+    TokenRes {
+        id: t.id,
+        label: t.label,
+        created_at: t.created_at,
+        last_used: t.last_used,
+        secret,
+    }
+}
+
+#[derive(Deserialize)]
+pub struct CreateTokenReq {
+    /// What the token is for, so a stale one is identifiable a year later.
+    label: String,
+}
+
+async fn create_bot_token(
+    State(st): State<Shared>,
+    AdminAuth(actor): AdminAuth,
+    Path(bot_id): Path<Id>,
+    Json(req): Json<CreateTokenReq>,
+) -> ApiResult<Json<TokenRes>> {
+    let target = st.db(move |s| s.user(bot_id)).await?;
+    // Only bots. Minting a permanent credential for a person's account would
+    // be a way around their password and their session revocation.
+    if !target.bot {
+        return Err(ApiError::BadRequest(
+            "API tokens can only be issued to bot accounts".into(),
+        ));
+    }
+    let label = req.label.trim().to_string();
+    if label.is_empty() || label.chars().count() > 64 {
+        return Err(ApiError::BadRequest("give the token a short label".into()));
+    }
+
+    let token = auth::new_session_token();
+    let (id, hash, now, by) = (st.next_id(), token.hash, now_ms(), actor.id);
+    let created = st
+        .db(move |s| s.create_api_token(id, &hash, bot_id, &label, by, now))
+        .await?;
+
+    Ok(Json(token_res(created, Some(token.secret))))
+}
+
+async fn list_bot_tokens(
+    State(st): State<Shared>,
+    AdminAuth(_): AdminAuth,
+    Path(bot_id): Path<Id>,
+) -> ApiResult<Json<Vec<TokenRes>>> {
+    let tokens = st.db(move |s| s.api_tokens_for(bot_id)).await?;
+    Ok(Json(
+        tokens.into_iter().map(|t| token_res(t, None)).collect(),
+    ))
+}
+
+async fn revoke_bot_token(
+    State(st): State<Shared>,
+    AdminAuth(_): AdminAuth,
+    Path(id): Path<Id>,
+) -> ApiResult<StatusCode> {
+    st.db(move |s| s.delete_api_token(id)).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+pub struct HookReq {
+    channel: Id,
+    text: String,
+}
+
+/// Post a message using a token carried in the URL.
+///
+/// Exists for senders that can only POST a JSON body to a fixed URL and cannot
+/// set an `Authorization` header — which is most CI systems and alerting
+/// tools. Anything that *can* set a header should use the ordinary message
+/// endpoint with the same token as a bearer credential; this is a convenience,
+/// not a second authorization model.
+///
+/// A token in a URL is a weaker secret than one in a header: URLs end up in
+/// proxy logs and browser history. That is why bots are contained by channel
+/// membership — a leaked hook URL can post to the channels its bot was added
+/// to, and reach nothing else.
+async fn incoming_hook(
+    State(st): State<Shared>,
+    Path(token): Path<String>,
+    Json(req): Json<HookReq>,
+) -> ApiResult<Json<Message>> {
+    let hash = auth::token_hash(&token);
+    let now = now_ms();
+    let user = st
+        .db(move |s| s.api_token_user(&hash, now))
+        .await
+        .map_err(|_| ApiError::Unauthorized)?;
+
+    // Straight through the same service call an interactive client uses, so a
+    // hook post is persisted and broadcast identically to any other message.
+    Ok(Json(
+        service::post_message(&st, &user, req.channel, &req.text, None, Vec::new()).await?,
+    ))
 }
 
 // ---------------------------------------------------------------- channels

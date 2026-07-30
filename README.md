@@ -38,6 +38,12 @@ hits and permalinks jump into the surrounding history rather than dead-ending.
 others or deactivate accounts. Deactivation signs the account out everywhere and
 blocks sign-in while leaving its messages, mentions and threads intact.
 
+**Integrations** — bot accounts with long-lived API tokens. A token works as a
+bearer credential on the whole HTTP API, and `POST /api/hooks/{token}` accepts
+`{"channel": "...", "text": "..."}` for senders that cannot set headers. A bot
+can only reach the channels it has been added to, so a leaked hook URL is
+contained by membership like anything else.
+
 **Client** — virtual-scrolled history that stays smooth over a hundred thousand
 messages, optimistic sending, per-channel drafts, mention autocomplete, drag-drop
 and paste-to-upload, opt-in desktop notifications, a light and dark theme, and
@@ -266,6 +272,8 @@ Honest ones, since a chat server invites comparison:
   on every table and a join on every query.
 - **The user directory ships whole at connect.** Fine into the low thousands;
   beyond that it needs paging.
+- **No outbound integrations.** Incoming webhooks exist; there is nothing that
+  calls *out* to another service, and no slash commands.
 - **No Web Push.** Desktop notifications work while a tab is open; waking a
   device with no page open would need a service worker, VAPID keys, and a
   subscription store. No voice, no calls, no bridges.

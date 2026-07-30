@@ -563,6 +563,238 @@ async fn a_promoted_user_can_then_administer() {
 }
 
 #[tokio::test]
+async fn a_bot_token_works_as_a_bearer_credential_on_the_normal_api() {
+    let app = App::new();
+    let (alice, _) = app.account("alice").await;
+
+    let (status, bot) = app
+        .send(
+            "POST",
+            "/api/admin/bots",
+            Some(&alice),
+            Some(json!({ "handle": "deploybot", "display_name": "Deploy Bot" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create bot: {bot}");
+    assert_eq!(bot["bot"], true);
+    let bot_id = bot["id"].as_str().unwrap().to_string();
+
+    let (status, token) = app
+        .send(
+            "POST",
+            &format!("/api/admin/bots/{bot_id}/tokens"),
+            Some(&alice),
+            Some(json!({ "label": "ci" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let secret = token["secret"].as_str().unwrap().to_string();
+    let token_id = token["id"].as_str().unwrap().to_string();
+
+    // The secret is shown once and never again.
+    let (_, listed) = app
+        .send(
+            "GET",
+            &format!("/api/admin/bots/{bot_id}/tokens"),
+            Some(&alice),
+            None,
+        )
+        .await;
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+    assert!(
+        listed[0]["secret"].is_null(),
+        "a listing must never carry secrets"
+    );
+
+    // It authenticates the ordinary API, exactly like a session does.
+    let (status, me) = app.send("GET", "/api/me", Some(&secret), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(me["id"].as_str().unwrap(), bot_id);
+
+    // But only where the bot is a member.
+    let (_, channel) = app
+        .send(
+            "POST",
+            "/api/channels",
+            Some(&alice),
+            Some(json!({ "name": "deploys" })),
+        )
+        .await;
+    let ch = channel["id"].as_str().unwrap();
+    let (status, _) = app
+        .send(
+            "POST",
+            &format!("/api/channels/{ch}/messages"),
+            Some(&secret),
+            Some(json!({ "body": "build 41 shipped" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "not a member yet");
+
+    app.send(
+        "POST",
+        &format!("/api/channels/{ch}/members"),
+        Some(&alice),
+        Some(json!({ "users": [bot_id] })),
+    )
+    .await;
+    let (status, posted) = app
+        .send(
+            "POST",
+            &format!("/api/channels/{ch}/messages"),
+            Some(&secret),
+            Some(json!({ "body": "build 41 shipped" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(posted["au"].as_str().unwrap(), bot_id);
+
+    // Revocation takes effect immediately.
+    let (status, _) = app
+        .send(
+            "DELETE",
+            &format!("/api/admin/tokens/{token_id}"),
+            Some(&alice),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = app.send("GET", "/api/me", Some(&secret), None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn an_incoming_hook_posts_without_a_header() {
+    let app = App::new();
+    let (alice, _) = app.account("alice").await;
+    let (_, bot) = app
+        .send(
+            "POST",
+            "/api/admin/bots",
+            Some(&alice),
+            Some(json!({ "handle": "alertbot" })),
+        )
+        .await;
+    let bot_id = bot["id"].as_str().unwrap().to_string();
+    let (_, token) = app
+        .send(
+            "POST",
+            &format!("/api/admin/bots/{bot_id}/tokens"),
+            Some(&alice),
+            Some(json!({ "label": "alerts" })),
+        )
+        .await;
+    let secret = token["secret"].as_str().unwrap().to_string();
+
+    let (_, channel) = app
+        .send(
+            "POST",
+            "/api/channels",
+            Some(&alice),
+            Some(json!({ "name": "alerts", "members": [bot_id] })),
+        )
+        .await;
+    let ch = channel["id"].as_str().unwrap().to_string();
+
+    // No Authorization header anywhere — the point of the endpoint.
+    let (status, posted) = app
+        .send(
+            "POST",
+            &format!("/api/hooks/{secret}"),
+            None,
+            Some(json!({ "channel": ch, "text": "disk usage at 91%" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "hook post: {posted}");
+    assert_eq!(posted["b"], "disk usage at 91%");
+    assert_eq!(posted["au"].as_str().unwrap(), bot_id);
+
+    // It lands in real history, not a side channel.
+    let (_, page) = app
+        .send(
+            "GET",
+            &format!("/api/channels/{ch}/messages"),
+            Some(&alice),
+            None,
+        )
+        .await;
+    assert_eq!(page["messages"][0]["b"], "disk usage at 91%");
+
+    // A bogus token is unauthorized, and a real token cannot post to a channel
+    // its bot is not in.
+    let (status, _) = app
+        .send(
+            "POST",
+            "/api/hooks/not-a-real-token",
+            None,
+            Some(json!({ "channel": ch, "text": "let me in" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let (_, private) = app
+        .send(
+            "POST",
+            "/api/channels",
+            Some(&alice),
+            Some(json!({ "name": "secrets", "private": true })),
+        )
+        .await;
+    let secret_ch = private["id"].as_str().unwrap();
+    let (status, _) = app
+        .send(
+            "POST",
+            &format!("/api/hooks/{secret}"),
+            None,
+            Some(json!({ "channel": secret_ch, "text": "should not appear" })),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "membership is what contains a leaked hook URL"
+    );
+}
+
+#[tokio::test]
+async fn only_administrators_manage_bots_and_only_bots_get_tokens() {
+    let app = App::new();
+    let (alice, alice_id) = app.account("alice").await;
+    let (bob, _) = app.account("bob").await;
+
+    for (method, path, body) in [
+        (
+            "POST",
+            "/api/admin/bots".to_string(),
+            json!({ "handle": "sneaky" }),
+        ),
+        ("GET", "/api/admin/bots".to_string(), Value::Null),
+    ] {
+        let (status, _) = app
+            .send(
+                method,
+                &path,
+                Some(&bob),
+                if body.is_null() { None } else { Some(body) },
+            )
+            .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{method} {path}");
+    }
+
+    // A permanent credential for a person's account would be a way around both
+    // their password and their session revocation.
+    let (status, _) = app
+        .send(
+            "POST",
+            &format!("/api/admin/bots/{alice_id}/tokens"),
+            Some(&alice),
+            Some(json!({ "label": "backdoor" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn registration_can_be_closed() {
     let cfg = Config {
         open_registration: false,

@@ -1,4 +1,4 @@
--- TensorChat schema (version 5).
+-- TensorChat schema (version 6).
 --
 -- Conventions:
 --   * Every `id` is a Snowflake (see tc-core::id). Because they are monotonic,
@@ -40,6 +40,26 @@ CREATE TABLE sessions (
 ) STRICT, WITHOUT ROWID;
 
 CREATE INDEX sessions_by_user ON sessions (user_id);
+
+-- Long-lived API tokens, for bots and integrations. Deliberately not sessions
+-- with a distant expiry: sessions are revoked wholesale when a password
+-- changes, which is right for a person's devices and wrong for an integration.
+CREATE TABLE api_tokens (
+    token_hash BLOB    PRIMARY KEY,
+    -- Snowflake, so a token can be named in a URL for revocation without
+    -- exposing its digest.
+    id         INTEGER NOT NULL,
+    user_id    INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    label      TEXT    NOT NULL,
+    created_by INTEGER NOT NULL REFERENCES users (id),
+    created_at INTEGER NOT NULL,
+    -- NULL until first use. The only way to tell a live integration from one
+    -- nobody remembers setting up.
+    last_used  INTEGER
+) STRICT, WITHOUT ROWID;
+
+CREATE UNIQUE INDEX api_tokens_id ON api_tokens (id);
+CREATE INDEX api_tokens_by_user ON api_tokens (user_id);
 
 CREATE TABLE channels (
     id           INTEGER PRIMARY KEY,

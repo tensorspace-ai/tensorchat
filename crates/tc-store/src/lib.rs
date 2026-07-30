@@ -37,6 +37,7 @@ mod messages;
 mod pins;
 mod saved;
 mod search;
+mod tokens;
 mod users;
 
 pub use channels::NewChannel;
@@ -44,9 +45,10 @@ pub use messages::{HistoryPage, NewMessage};
 pub use pins::MAX_PINS_PER_CHANNEL;
 pub use saved::MAX_SAVED_PAGE;
 pub use search::SearchQuery;
+pub use tokens::ApiToken;
 
 /// Schema version embedded in the database via `PRAGMA user_version`.
-const SCHEMA_VERSION: i32 = 5;
+const SCHEMA_VERSION: i32 = 6;
 
 /// Incremental upgrades, each paired with the version it produces.
 ///
@@ -69,6 +71,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (3, include_str!("migrations/003_saved.sql")),
     (4, include_str!("migrations/004_mute.sql")),
     (5, include_str!("migrations/005_admin.sql")),
+    (6, include_str!("migrations/006_api_tokens.sql")),
 ];
 
 pub type Result<T> = std::result::Result<T, Error>;

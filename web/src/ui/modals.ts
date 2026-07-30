@@ -409,6 +409,148 @@ export function manageUsersDialog(store: Store): void {
   search.focus();
 }
 
+/**
+ * Bots and their API tokens.
+ *
+ * The secret is shown exactly once, in the response that mints it, and is
+ * unrecoverable afterwards — so the dialog puts it in a copyable box with an
+ * explicit warning rather than tucking it away somewhere it could be missed.
+ */
+export function manageBotsDialog(store: Store): void {
+  const list = el('div', { class: 'modal-list' });
+  const error = errorLine();
+  const handle = el('input', {
+    class: 'modal-input',
+    placeholder: 'New bot handle, e.g. deploybot',
+    'aria-label': 'New bot handle',
+  }) as HTMLInputElement;
+  const create = el('button', { class: 'modal-submit', text: 'Create bot' }) as HTMLButtonElement;
+
+  dialog(
+    'Bots & integrations',
+    el('p', {
+      class: 'modal-hint',
+      text: 'A bot posts through the API. Add it to a channel like anyone else — that is what decides where it can read and write.',
+    }),
+    handle,
+    create,
+    error,
+    list,
+  );
+
+  const showSecret = (secret: string) => {
+    const box = el('input', {
+      class: 'modal-input secret-box',
+      value: secret,
+      readonly: true,
+      'aria-label': 'New token',
+    }) as HTMLInputElement;
+    const note = el(
+      'div',
+      { class: 'modal-note' },
+      el('div', { text: 'Copy this now — it will not be shown again.' }),
+      box,
+    );
+    list.prepend(note);
+    box.focus();
+    box.select();
+  };
+
+  const render = async () => {
+    try {
+      const bots = await api.bots();
+      const withTokens = await Promise.all(
+        bots.map(async (b) => ({ bot: b, tokens: await api.botTokens(b.id) })),
+      );
+      replace(
+        list,
+        withTokens.length === 0
+          ? [el('div', { class: 'empty', text: 'No bots yet.' })]
+          : withTokens.map(({ bot, tokens }) =>
+              el(
+                'div',
+                { class: 'bot-block' },
+                el(
+                  'div',
+                  { class: 'manage-row' },
+                  avatar(bot.id, bot.n || bot.h, 28),
+                  el(
+                    'span',
+                    { class: 'person-main' },
+                    el('span', { class: 'person-name', text: bot.n || bot.h }),
+                    el('span', { class: 'person-handle', text: `@${bot.h}` }),
+                  ),
+                  el('span', { class: 'badge', text: 'APP' }),
+                  el('button', {
+                    class: 'manage-action',
+                    text: 'New token',
+                    on: {
+                      click: async () => {
+                        const label = prompt('What is this token for?', 'integration');
+                        if (!label) return;
+                        try {
+                          const t = await api.createBotToken(bot.id, label);
+                          await render();
+                          if (t.secret) showSecret(t.secret);
+                        } catch (err) {
+                          showError(error, err);
+                        }
+                      },
+                    },
+                  }),
+                ),
+                ...tokens.map((t) =>
+                  el(
+                    'div',
+                    { class: 'token-row' },
+                    el('span', { class: 'token-label', text: t.label }),
+                    el('span', {
+                      class: 'token-used',
+                      text: t.last_used
+                        ? `last used ${new Date(t.last_used).toLocaleDateString()}`
+                        : 'never used',
+                    }),
+                    el('button', {
+                      class: 'manage-action danger',
+                      text: 'Revoke',
+                      on: {
+                        click: async () => {
+                          await api.revokeBotToken(t.id);
+                          await render();
+                        },
+                      },
+                    }),
+                  ),
+                ),
+              ),
+            ),
+      );
+    } catch (err) {
+      showError(error, err);
+    }
+  };
+
+  create.addEventListener('click', async () => {
+    const raw = handle.value.trim().toLowerCase().replace(/^@/, '');
+    if (!raw) return;
+    create.disabled = true;
+    try {
+      const bot = await api.createBot(raw, raw);
+      store.users.update((prev) => new Map(prev).set(bot.id, bot));
+      handle.value = '';
+      error.hidden = true;
+      await render();
+    } catch (err) {
+      showError(error, err);
+    } finally {
+      create.disabled = false;
+    }
+  });
+
+  void render();
+  handle.focus();
+}
+
 export function preferencesDialog(
   store: Store,
   notifier: Notifier,
@@ -500,6 +642,18 @@ export function preferencesDialog(
             click: () => {
               d.close();
               manageUsersDialog(store);
+            },
+          },
+        })
+      : null,
+    me.adm
+      ? el('button', {
+          class: 'modal-secondary',
+          text: 'Bots & integrations',
+          on: {
+            click: () => {
+              d.close();
+              manageBotsDialog(store);
             },
           },
         })

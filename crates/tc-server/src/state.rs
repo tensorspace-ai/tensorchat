@@ -80,12 +80,19 @@ impl FromRequestParts<Shared> for Auth {
         let hash = crate::auth::token_hash(&token);
         let now = tc_core::now_ms();
 
-        let user = state
-            .db(move |s| s.session_user(&hash, now))
-            .await
-            // Any lookup failure is "not authenticated"; distinguishing
-            // expired from forged tells an attacker which tokens are real.
-            .map_err(|_| ApiError::Unauthorized)?;
+        // A session first, since interactive clients are the overwhelming
+        // majority of requests; then a long-lived API token, so a bot presents
+        // its credential exactly like a browser does and every downstream
+        // authorization rule applies to it unchanged.
+        let user = match state.db(move |s| s.session_user(&hash, now)).await {
+            Ok(user) => user,
+            Err(_) => state
+                .db(move |s| s.api_token_user(&hash, now))
+                .await
+                // Any lookup failure is "not authenticated"; distinguishing
+                // expired from forged tells an attacker which tokens are real.
+                .map_err(|_| ApiError::Unauthorized)?,
+        };
         Ok(Auth(user))
     }
 }

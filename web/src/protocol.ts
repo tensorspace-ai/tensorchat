@@ -79,6 +79,15 @@ export type ReadState = {
 
 export type SearchHit = { m: Message; sn: string };
 
+export type ApiToken = {
+  id: Id;
+  label: string;
+  created_at: number;
+  last_used?: number | null;
+  /** Only present in the response that created it. */
+  secret?: string;
+};
+
 /**
  * Sentinels wrapping matched terms in a search snippet.
  *
