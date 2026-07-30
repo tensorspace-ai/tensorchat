@@ -9,12 +9,13 @@
  *   keystroke — the difference between a handful of frames per message and
  *   dozens.
  * * **Mention autocomplete** over the local user list, so it costs no request.
- * * **Draft persistence** per channel, so switching channels mid-sentence does
- *   not lose the sentence.
+ * * **Draft persistence** per channel, in `localStorage`, so neither switching
+ *   channels nor closing the tab loses a half-written sentence.
  */
 
 import { ICONS, el, icon, replace } from '../dom.ts';
 import { effect } from '../signals.ts';
+import { clearDraft, loadDraft, saveDraft } from '../drafts.ts';
 import { expandShortcodes, searchEmoji } from '../emoji.ts';
 import type { Attachment, Id, User } from '../protocol.ts';
 import type { Store } from '../store.ts';
@@ -37,7 +38,6 @@ export function Composer(
   actions: ComposerActions,
   opts: { placeholder?: () => string; threadRoot?: Id } = {},
 ): HTMLElement {
-  const drafts = new Map<Id, string>();
   const staged: Attachment[] = [];
   let lastTypingSent = 0;
   let activeChannel: Id | null = null;
@@ -112,9 +112,9 @@ export function Composer(
     const channel = opts.threadRoot ?? store.currentChannel();
     if (channel === activeChannel) return;
     // Save the outgoing channel's draft before swapping.
-    if (activeChannel) drafts.set(activeChannel, input.value);
+    if (activeChannel) saveDraft(activeChannel, input.value);
     activeChannel = channel;
-    input.value = channel ? (drafts.get(channel) ?? '') : '';
+    input.value = channel ? loadDraft(channel) : '';
     autosize();
     updateSendState();
   });
@@ -150,7 +150,7 @@ export function Composer(
 
     input.value = '';
     staged.length = 0;
-    if (activeChannel) drafts.delete(activeChannel);
+    if (activeChannel) clearDraft(activeChannel);
     renderStaged();
     autosize();
     updateSendState();
@@ -161,6 +161,10 @@ export function Composer(
     autosize();
     updateSendState();
     updateSuggestions();
+    // Record as we go rather than only on channel switch: a reload is the case
+    // persistence exists for, and it gives no warning. The write itself is
+    // debounced inside `saveDraft`, so this is not a disk hit per keystroke.
+    if (activeChannel) saveDraft(activeChannel, input.value);
 
     // Throttle: one frame every few seconds regardless of typing speed.
     const now = Date.now();

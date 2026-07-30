@@ -51,7 +51,8 @@ can only reach the channels it has been added to, so a leaked hook URL is
 contained by membership like anything else.
 
 **Client** — virtual-scrolled history that stays smooth over a hundred thousand
-messages, optimistic sending, per-channel drafts, mention autocomplete, drag-drop
+messages, optimistic sending, per-channel drafts that survive a reload, mention
+autocomplete, drag-drop
 and paste-to-upload, opt-in desktop notifications, a light and dark theme, and
 keyboard navigation.
 

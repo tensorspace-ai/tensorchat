@@ -7,6 +7,7 @@
 import { ICONS, el, icon, replace } from './dom.ts';
 import { effect } from './signals.ts';
 import { api, setToken } from './api.ts';
+import { clearAllDrafts } from './drafts.ts';
 import { Connection } from './ws.ts';
 import { store } from './store.ts';
 import { createNotifier } from './notify.ts';
@@ -273,6 +274,9 @@ function start(root: HTMLElement): void {
         () => {
           void api.logout().catch(() => {});
           setToken(null);
+          // Unsent text is the one thing here the server cannot re-supply, so
+          // it must not be left in storage for whoever uses this browser next.
+          clearAllDrafts();
           conn.close();
           location.reload();
         },

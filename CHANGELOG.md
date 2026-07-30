@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Drafts survive a reload** — unsent text moved from an in-memory `Map` to
+  `localStorage`. Writes are debounced so typing never blocks on a synchronous
+  disk write, and flushed on `pagehide` and on the tab being hidden so a reload
+  moments after the last keystroke keeps it. Drafts are pruned by age and
+  count, truncated to the server's body limit, and cleared on sign-out.
 - **Invite links** — administrators mint links from Preferences → Invite
   people, or `POST /api/admin/invites`. A link may be single-use or multi-use,
   expiring or permanent, and is revocable. `/api/register` accepts an `invite`
