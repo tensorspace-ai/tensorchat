@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Operator console** — `tc-server invite`, `promote` and `demote`, run against
+- **Operator console** — `tensorchat invite`, `promote` and `demote`, run against
   the database rather than the API. Closes the gap where a workspace started
   with `TC_OPEN_REGISTRATION=false` had nobody who could mint the first invite:
   the documented workaround was to start open, register, and restart closed,
@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   offline — cache-first for content-hashed assets, network-first for everything
   else so a deploy is never pinned by a stale `index.html`.
 - **Search operators** — `from:`, `in:`, `before:`, `after:` and `has:link` /
-  `has:file` / `has:image`, parsed out of the query in `tc_core::query`. Date
+  `has:file` / `has:image`, parsed out of the query in `tensorchat_core::query`. Date
   bounds become id bounds, since ids are time-sortable, so they need no
   timestamp column and no second index. A query of operators alone is a valid
   search answered newest-first. An unrecognized `key:value` stays free text, so

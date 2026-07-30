@@ -97,12 +97,12 @@ symptom was ordinary concurrent message sends failing under load with "database
 is locked".
 
 `IMMEDIATE` takes the write lock up front, so contending writers queue on the
-timeout instead of erroring. `crates/tc-store/tests/concurrency.rs` locks this
+timeout instead of erroring. `crates/tensorchat-store/tests/concurrency.rs` locks this
 in against a real file-backed database, and fails if the behavior is reverted.
 
 ### Blocking
 
-`tc-store` is entirely synchronous. `AppState::db` is the single place it is
+`tensorchat-store` is entirely synchronous. `AppState::db` is the single place it is
 called from, wrapping each operation in `spawn_blocking`, so "never block a
 reactor thread" is enforced in one location rather than remembered at every call
 site.

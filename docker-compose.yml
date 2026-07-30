@@ -19,7 +19,7 @@ services:
       # Close signups once your team has accounts.
       TC_OPEN_REGISTRATION: "true"
       TC_MAX_UPLOAD: "26214400"
-      RUST_LOG: "tc_server=info"
+      RUST_LOG: "tensorchat_server=info"
       # Behind a proxy, every client arrives from the same address, so the
       # per-address auth limiter needs headroom and the real throttling belongs
       # at the proxy.

@@ -102,7 +102,7 @@ Requires Rust 1.95+ (2024 edition) and Node 22+.
 cd web && npm install && npm run build && cd ..
 
 # Run the server
-cargo run --release -p tc-server
+cargo run --release -p tensorchat-server
 ```
 
 Open <http://127.0.0.1:8080> and create an account. The first account to
@@ -114,7 +114,7 @@ promoting an arbitrary account would be a surprising grant of privilege. Choose
 one deliberately:
 
 ```sh
-tc-server promote you
+tensorchat promote you
 ```
 
 The database (`tensorchat.db`) and uploads (`blobs/`) are created on first run.
@@ -151,10 +151,10 @@ All configuration is environment variables. Everything has a working default.
 | `TC_OPEN_REGISTRATION` | `true` | Set `false` to close signups. Invite links still work — see below. |
 | `TC_AUTH_BURST` | `10` | Login/register attempts allowed per client address before throttling. |
 | `TC_AUTH_PER_SECOND` | `0.5` | Refill rate for that allowance. Raise both behind a proxy that hides client addresses. |
-| `TC_PUBLIC_URL` | *(unset)* | How people reach this server, e.g. `https://chat.example.com`. Used for links printed by `tc-server invite`. |
+| `TC_PUBLIC_URL` | *(unset)* | How people reach this server, e.g. `https://chat.example.com`. Used for links printed by `tensorchat invite`. |
 | `TC_PUSH_CONTACT` | `mailto:admin@localhost` | Contact address in VAPID tokens. Set to an empty string to disable Web Push. |
 | `TC_PERMISSIVE_CORS` | `false` | Development only. |
-| `RUST_LOG` | `tc_server=info` | Log filter. |
+| `RUST_LOG` | `tensorchat_server=info` | Log filter. |
 
 ### Closing registration
 
@@ -163,8 +163,8 @@ work, so this is the setting most deployments want — and it can be set from th
 very first boot. Mint the first link from the operator console:
 
 ```sh
-TC_OPEN_REGISTRATION=false tc-server     # start it closed, from empty
-tc-server invite                         # in another shell; prints a link
+TC_OPEN_REGISTRATION=false tensorchat     # start it closed, from empty
+tensorchat invite                         # in another shell; prints a link
 ```
 
 Whoever opens that link first picks their own handle and password and becomes
@@ -182,10 +182,10 @@ things that cannot go through the API because they are what *creates* the
 authority the API checks:
 
 ```sh
-tc-server invite [--uses N] [--days N] [--label TEXT] [--url ORIGIN]
-tc-server promote <handle>
-tc-server demote <handle>
-tc-server help
+tensorchat invite [--uses N] [--days N] [--label TEXT] [--url ORIGIN]
+tensorchat promote <handle>
+tensorchat demote <handle>
+tensorchat help
 ```
 
 They read the same environment as the server (`TC_DB` and friends), so they act
@@ -193,7 +193,7 @@ on the same database with no extra arguments — including while it is running,
 since SQLite's WAL mode allows a second writer. Under Docker:
 
 ```sh
-docker compose exec tensorchat tc-server invite
+docker compose exec tensorchat tensorchat invite
 ```
 
 These require no authentication, and deliberately so: anyone who can run this
@@ -219,7 +219,7 @@ only appear while a tab is open.
 
 ```sh
 cd web && npm run dev     # rebuild the client on change
-cargo run -p tc-server    # debug server
+cargo run -p tensorchat-server    # debug server
 ```
 
 ---
@@ -229,11 +229,11 @@ cargo run -p tc-server    # debug server
 Three crates, one clear dependency direction:
 
 ```
-tc-core   domain types, wire protocol, ID generation   (no I/O)
+tensorchat-core   domain types, wire protocol, ID generation   (no I/O)
    ↑
-tc-store  SQLite: schema, queries, full-text search    (no async)
+tensorchat-store  SQLite: schema, queries, full-text search    (no async)
    ↑
-tc-server axum: HTTP, WebSocket hub, authentication
+tensorchat-server axum: HTTP, WebSocket hub, authentication
 ```
 
 [`ARCHITECTURE.md`](ARCHITECTURE.md) explains the design decisions in full. The

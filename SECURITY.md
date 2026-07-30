@@ -21,7 +21,7 @@ or by email to <security@tensorspace.ai>.
 Please include:
 
 - What the issue is and what an attacker gains from it.
-- Steps to reproduce, ideally against a fresh `cargo run -p tc-server`.
+- Steps to reproduce, ideally against a fresh `cargo run -p tensorchat-server`.
 - The version or commit you tested.
 - Any proof-of-concept you have.
 

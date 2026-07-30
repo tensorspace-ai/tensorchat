@@ -29,4 +29,4 @@ together take several times as long to review as the two separately.
 - [ ] No runtime dependency was added to the web client
 - [ ] No `innerHTML`; the client still builds DOM nodes
 - [ ] Membership checks still happen inside the write transaction
-- [ ] The `tc-core` ← `tc-store` ← `tc-server` dependency direction is unchanged
+- [ ] The `tensorchat-core` ← `tensorchat-store` ← `tensorchat-server` dependency direction is unchanged

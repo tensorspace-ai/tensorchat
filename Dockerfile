@@ -23,21 +23,21 @@ WORKDIR /src
 # Prime the dependency cache with the manifests and stub sources, so editing
 # application code does not rebuild the whole dependency graph.
 COPY Cargo.toml Cargo.lock ./
-COPY crates/tc-core/Cargo.toml crates/tc-core/
-COPY crates/tc-store/Cargo.toml crates/tc-store/
-COPY crates/tc-server/Cargo.toml crates/tc-server/
-RUN mkdir -p crates/tc-core/src crates/tc-store/src crates/tc-server/src \
-    && echo "" > crates/tc-core/src/lib.rs \
-    && echo "" > crates/tc-store/src/lib.rs \
-    && echo "" > crates/tc-server/src/lib.rs \
-    && echo "fn main() {}" > crates/tc-server/src/main.rs \
-    && cargo build --release -p tc-server \
+COPY crates/tensorchat-core/Cargo.toml crates/tensorchat-core/
+COPY crates/tensorchat-store/Cargo.toml crates/tensorchat-store/
+COPY crates/tensorchat-server/Cargo.toml crates/tensorchat-server/
+RUN mkdir -p crates/tensorchat-core/src crates/tensorchat-store/src crates/tensorchat-server/src \
+    && echo "" > crates/tensorchat-core/src/lib.rs \
+    && echo "" > crates/tensorchat-store/src/lib.rs \
+    && echo "" > crates/tensorchat-server/src/lib.rs \
+    && echo "fn main() {}" > crates/tensorchat-server/src/main.rs \
+    && cargo build --release -p tensorchat-server \
     && rm -rf crates/*/src
 
 COPY crates/ crates/
 # Cargo keys rebuilds on mtime; the stub artifacts must not shadow the real ones.
-RUN touch crates/*/src/lib.rs crates/tc-server/src/main.rs \
-    && cargo build --release -p tc-server
+RUN touch crates/*/src/lib.rs crates/tensorchat-server/src/main.rs \
+    && cargo build --release -p tensorchat-server
 
 # ---- runtime ----------------------------------------------------------------
 FROM debian:bookworm-slim AS runtime
@@ -52,7 +52,7 @@ RUN apt-get update \
     && mkdir -p /data \
     && chown tensorchat:tensorchat /data
 
-COPY --from=server /src/target/release/tc-server /usr/local/bin/tc-server
+COPY --from=server /src/target/release/tensorchat /usr/local/bin/tensorchat
 COPY --from=web /web/dist /app/web
 
 USER tensorchat
@@ -64,7 +64,7 @@ ENV TC_BIND=0.0.0.0:8080 \
     TC_DB=/data/tensorchat.db \
     TC_BLOBS=/data/blobs \
     TC_WEB=/app/web \
-    RUST_LOG=tc_server=info
+    RUST_LOG=tensorchat_server=info
 
 VOLUME ["/data"]
 EXPOSE 8080
@@ -72,4 +72,4 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD curl --fail --silent --output /dev/null http://127.0.0.1:8080/healthz
 
-ENTRYPOINT ["/usr/local/bin/tc-server"]
+ENTRYPOINT ["/usr/local/bin/tensorchat"]

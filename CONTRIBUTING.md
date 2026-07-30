@@ -11,7 +11,7 @@ You need Rust 1.95+ (2024 edition) and Node 22+.
 git clone https://github.com/tensorspace-ai/tensorchat
 cd tensorchat
 cd web && npm install && npm run build && cd ..
-cargo run -p tc-server
+cargo run -p tensorchat-server
 ```
 
 Then open <http://127.0.0.1:8080>. The database and `blobs/` directory are
@@ -22,7 +22,7 @@ in another:
 
 ```sh
 cd web && npm run dev
-cargo run -p tc-server
+cargo run -p tensorchat-server
 ```
 
 ## Before you open a pull request
@@ -52,7 +52,7 @@ Match the density and tone of the surrounding file.
 
 **Bring a test.** Bug fixes should come with a test that fails before the fix.
 Behavior changes should come with a test that describes the new behavior. The
-concurrency suite in `crates/tc-store/tests/` exists because a real bug slipped
+concurrency suite in `crates/tensorchat-store/tests/` exists because a real bug slipped
 past unit tests — if your change touches transaction boundaries or the hub's
 routing, that is the suite to extend.
 
@@ -84,8 +84,8 @@ structurally impossible for message content to become markup.
 **Membership is checked in the transaction that writes.** Not before it, not
 after it. Authorization that happens outside the write transaction is a race.
 
-**The dependency direction is one-way.** `tc-core` (no I/O) ← `tc-store` (no
-async) ← `tc-server`. Nothing flows the other way.
+**The dependency direction is one-way.** `tensorchat-core` (no I/O) ← `tensorchat-store` (no
+async) ← `tensorchat-server`. Nothing flows the other way.
 
 ## Reporting bugs and requesting features
 

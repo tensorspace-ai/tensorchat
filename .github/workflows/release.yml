@@ -76,7 +76,7 @@ jobs:
           key: ${{ matrix.target }}
 
       - name: Build
-        run: cargo build --release --locked --target ${{ matrix.target }} -p tc-server
+        run: cargo build --release --locked --target ${{ matrix.target }} -p tensorchat-server
 
       - uses: actions/download-artifact@v4
         with:
@@ -95,7 +95,7 @@ jobs:
           version="${TAG#v}"
           name="tensorchat-${version}-${{ matrix.target }}"
           mkdir -p "dist/${name}/web"
-          cp "target/${{ matrix.target }}/release/tc-server" "dist/${name}/"
+          cp "target/${{ matrix.target }}/release/tensorchat" "dist/${name}/"
           cp -R web-dist/. "dist/${name}/web/"
           cp README.md ARCHITECTURE.md LICENSE CHANGELOG.md "dist/${name}/"
           tar -czf "dist/${name}.tar.gz" -C dist "${name}"
