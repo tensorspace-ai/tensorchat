@@ -36,8 +36,8 @@ rustls = { version = "0.23.43", default-features = false, features = ["ring", "s
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sha2 = "0.11.0"
-tensorchat-core = { version = "0.1.0", path = "../tensorchat-core" }
-tensorchat-store = { version = "0.1.0", path = "../tensorchat-store" }
+tensorchat-core = { version = "0.2.0", path = "../tensorchat-core" }
+tensorchat-store = { version = "0.2.0", path = "../tensorchat-store" }
 thiserror = "2.0.19"
 tokio = { version = "1.53.1", features = ["full"] }
 tokio-util = { version = "0.7.19", features = ["io"] }

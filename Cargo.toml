@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/tensorchat-core", "crates/tensorchat-store", "crates/tensorchat-server"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 # The floor the README promises and CI enforces with a dedicated build job.
 # Set by libsqlite3-sys, whose build script uses cfg_select! (stable in 1.95)

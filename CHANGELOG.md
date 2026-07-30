@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-07-30
+
+First release published to crates.io, as `tensorchat-core`, `tensorchat-store`
+and `tensorchat-server`. The installed binary is named `tensorchat`.
+
+### Changed
+
+- **The crates were renamed.** `tc-core` and `tc-server` are names other people
+  already hold on crates.io — `tc-server` since 2024, and `tc-core` by way of
+  `tc_core`, since the registry treats hyphens and underscores as one name. The
+  crates are now `tensorchat-core`, `tensorchat-store` and `tensorchat-server`,
+  and the binary they build is `tensorchat` rather than `tc-server`. Anyone
+  running the 0.1.0 binary or the Docker image should expect the command name
+  and the `RUST_LOG` target (`tensorchat_server=info`) to have changed with it.
+
 ### Added
 
 - **Operator console** — `tensorchat invite`, `promote` and `demote`, run against
@@ -159,5 +174,6 @@ Initial release.
   a Content-Security-Policy with no `unsafe-inline`, and a content-type
   allowlist for uploads.
 
-[Unreleased]: https://github.com/tensorspace-ai/tensorchat/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/tensorspace-ai/tensorchat/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/tensorspace-ai/tensorchat/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/tensorspace-ai/tensorchat/releases/tag/v0.1.0
