@@ -44,6 +44,23 @@ pub use search::SearchQuery;
 /// Schema version embedded in the database via `PRAGMA user_version`.
 const SCHEMA_VERSION: i32 = 1;
 
+/// Incremental upgrades, each paired with the version it produces.
+///
+/// A database created by an older build replays every entry newer than its own
+/// version. A *fresh* database skips all of them and gets `schema.sql`, which is
+/// always the current schema — replaying years of history to build an empty
+/// database would be pointless, and it would make `schema.sql` stop being a
+/// readable description of what the tables actually are.
+///
+/// The risk in having two paths is that they drift, so
+/// `migrations_match_a_fresh_schema` runs both and compares the result. Adding a
+/// migration without updating `schema.sql`, or vice versa, fails that test.
+///
+/// Entry `001` is the version 1 baseline and is never applied by
+/// [`Store::migrate`] — nothing predates it. It exists so the equivalence test
+/// has somewhere to start.
+const MIGRATIONS: &[(i32, &str)] = &[(1, include_str!("migrations/001_initial.sql"))];
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
@@ -148,12 +165,15 @@ impl Store {
         Ok(self.pool.get()?)
     }
 
-    /// Apply the schema if this is a fresh database.
+    /// Bring the database up to [`SCHEMA_VERSION`], creating it if it is empty.
     ///
-    /// Version 1 is the initial schema, so there is nothing to upgrade *from*
-    /// yet; the version gate exists so that the first real migration has a
-    /// correct starting point, and so a database written by a newer build fails
-    /// loudly here instead of being queried with stale SQL.
+    /// Runs on every open, so a deployment upgrades by restarting the binary —
+    /// there is no separate migration step to forget. A database written by a
+    /// *newer* build fails loudly here rather than being queried with stale SQL.
+    ///
+    /// The whole upgrade is one transaction: a half-applied schema is the one
+    /// state from which there is no automatic recovery, so an interrupted or
+    /// failing migration must leave the database exactly as it was.
     fn migrate(&self) -> Result<()> {
         let mut conn = self.conn()?;
         let version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
@@ -172,9 +192,18 @@ impl Store {
         // reads first and only later writes must be failed with SQLITE_BUSY the
         // moment it tries to upgrade, because its read snapshot may already be
         // stale — `busy_timeout` cannot rescue it. Taking the write lock up
-        // front means contending writers queue on the timeout instead.
+        // front means contending writers queue on the timeout instead. It also
+        // serializes two processes starting at once, so the second one waits
+        // and then finds the schema already current rather than racing it.
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        tx.execute_batch(include_str!("schema.sql"))?;
+        if version == 0 {
+            // Fresh: the current schema outright, no history to replay.
+            tx.execute_batch(include_str!("schema.sql"))?;
+        } else {
+            for (_, sql) in MIGRATIONS.iter().filter(|(v, _)| *v > version) {
+                tx.execute_batch(sql)?;
+            }
+        }
         tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         tx.commit()?;
         Ok(())
@@ -238,6 +267,123 @@ mod tests {
         drop(conn);
         // Re-running migrate must be a no-op, not "table already exists".
         store.migrate().unwrap();
+    }
+
+    /// Every object in a database, as SQLite itself describes it.
+    fn schema_of(conn: &Connection) -> Vec<(String, String, String)> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT type, name, coalesce(sql, '') FROM sqlite_master \
+                 WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name",
+            )
+            .unwrap();
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn migrations_match_a_fresh_schema() {
+        // The one thing that can go wrong with keeping `schema.sql` current
+        // *and* shipping incremental migrations is that they drift: a new build
+        // creates a table on a fresh install that an upgraded database never
+        // gets, and the bug only appears on someone else's server. So build a
+        // database both ways and compare what SQLite ended up with.
+        let fresh = Connection::open_in_memory().unwrap();
+        fresh
+            .execute_batch(include_str!("schema.sql"))
+            .expect("fresh schema must apply");
+
+        let upgraded = Connection::open_in_memory().unwrap();
+        for (version, sql) in MIGRATIONS {
+            upgraded
+                .execute_batch(sql)
+                .unwrap_or_else(|e| panic!("migration {version} failed: {e}"));
+        }
+
+        assert_eq!(
+            schema_of(&upgraded),
+            schema_of(&fresh),
+            "schema.sql and the migration chain have diverged — a change landed \
+             in one but not the other"
+        );
+    }
+
+    #[test]
+    fn the_migration_list_is_ordered_and_reaches_the_current_version() {
+        let versions: Vec<i32> = MIGRATIONS.iter().map(|(v, _)| *v).collect();
+        let mut sorted = versions.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(versions, sorted, "migrations must be ascending and unique");
+        assert_eq!(
+            versions.last().copied(),
+            Some(SCHEMA_VERSION),
+            "the last migration must produce SCHEMA_VERSION"
+        );
+    }
+
+    #[test]
+    fn an_older_database_is_upgraded_in_place_without_losing_rows() {
+        // Stand up a database at the oldest supported version, put a row in it,
+        // then let `Store::open` find it and bring it forward.
+        let dir = std::env::temp_dir().join(format!("tc-migrate-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("old.db");
+        let _ = std::fs::remove_file(&path);
+
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(MIGRATIONS[0].1).unwrap();
+            conn.pragma_update(None, "user_version", MIGRATIONS[0].0)
+                .unwrap();
+            conn.execute(
+                "INSERT INTO users (id, handle, display_name, password_hash) \
+                 VALUES (1, 'alice', 'Alice', 'phc')",
+                [],
+            )
+            .unwrap();
+        }
+
+        let store = Store::open(&path).expect("an older database must open");
+        let conn = store.conn().unwrap();
+        let v: i32 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, SCHEMA_VERSION);
+        let handle: String = conn
+            .query_row("SELECT handle FROM users WHERE id = 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(handle, "alice", "existing data must survive the upgrade");
+        assert_eq!(schema_of(&conn), {
+            let fresh = Connection::open_in_memory().unwrap();
+            fresh.execute_batch(include_str!("schema.sql")).unwrap();
+            schema_of(&fresh)
+        });
+
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_database_from_a_newer_build_is_refused() {
+        // Better to fail at startup than to query tomorrow's tables with
+        // today's SQL and corrupt them.
+        let dir = std::env::temp_dir().join(format!("tc-newer-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("future.db");
+        let _ = std::fs::remove_file(&path);
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.pragma_update(None, "user_version", SCHEMA_VERSION + 1)
+                .unwrap();
+        }
+        assert!(matches!(
+            Store::open(&path),
+            Err(Error::SchemaTooNew { .. })
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
