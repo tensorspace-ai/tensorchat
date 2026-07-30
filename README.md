@@ -31,7 +31,8 @@ resynchronization.
 
 **Reading** — unread and mention badges, a per-channel read cursor synchronized
 across devices, pinned and saved messages, per-channel mute, and full-text
-search with highlighted snippets, scoped to the channels you belong to.
+search with highlighted snippets, scoped to the channels you belong to. Search
+hits and permalinks jump into the surrounding history rather than dead-ending.
 
 **Administration** — the first account is an administrator, and can promote
 others or deactivate accounts. Deactivation signs the account out everywhere and
@@ -166,6 +167,7 @@ derived client-side from a delta.
 u64. That one choice makes the primary key double as the pagination cursor and
 the time index: history is `WHERE channel_id = ? AND id < ? ORDER BY id DESC`,
 a pure descending index scan with no offset, no sort, and no timestamp column.
+Jumping to a message is the same index read in both directions from an anchor.
 Message timestamps are recovered from the ID, so they cost nothing on the wire.
 
 **SQLite, in process.** A chat server's working set is "the last few hundred

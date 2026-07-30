@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Jump to a message** — search hits, saved items and permalinks open the
+  channel positioned on the message, via `?around=` on the history endpoint.
+  A "Copy link to message" action produces `#/c/{channel}/{message}` links, and
+  a bar offers "Jump to latest" while viewing a historical window.
 - **Administrators** — the first account to register becomes one, and can
   promote others or deactivate accounts via `PATCH /api/admin/users/{id}` and a
   "Manage people" dialog. `User.deactivated` existed in the model but nothing

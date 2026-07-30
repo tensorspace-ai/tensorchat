@@ -40,6 +40,16 @@ export type ChannelLog = {
   /** True once history has been read back to the channel's first message. */
   complete: boolean;
   loading: boolean;
+  /**
+   * Set when this log is a *window* around some older message rather than the
+   * live tail — after jumping to a search hit or a permalink.
+   *
+   * While it is set, incoming messages are deliberately not appended: there is
+   * a gap between the window and the present, so tacking the newest message
+   * onto the bottom would render it as though it followed the one above it.
+   * The UI offers "Jump to latest", which clears the log and reloads live.
+   */
+  anchor: Id | null;
   /** Bumped on any mutation. */
   version: Signal<number>;
 };
@@ -64,6 +74,7 @@ function newLog(): ChannelLog {
     cursor: null,
     complete: false,
     loading: false,
+    anchor: null,
     version: signal(0),
   };
 }
@@ -99,6 +110,13 @@ export class Store {
    * pane is reopened. Null until the first one arrives.
    */
   memberChange = signal<{ ch: Id; u: Id; j: boolean } | null>(null);
+
+  /**
+   * A message to flash in the scroll, after jumping to it. Cleared once the
+   * highlight has run its course, so re-jumping to the same message flashes
+   * again rather than silently doing nothing.
+   */
+  highlight = signal<Id | null>(null);
 
   /** Currently open channel, or null on the empty state. */
   currentChannel = signal<Id | null>(null);
@@ -265,6 +283,42 @@ export class Store {
     l.version.update((v) => v + 1);
   }
 
+  /**
+   * Replace a channel's log with a window centred on `anchor`.
+   *
+   * Wholesale rather than merged: the window may be nowhere near what was
+   * loaded, and stitching two disjoint ranges together would put a silent gap
+   * in the middle of the scroll.
+   */
+  showAround(channel: Id, anchor: Id, page: Message[], cursor: Id | null): void {
+    const l = this.log(channel);
+    l.messages = [...page].sort((a, b) => idCompare(a.id, b.id));
+    l.index.clear();
+    for (let i = 0; i < l.messages.length; i++) l.index.set(l.messages[i].id, i);
+    l.cursor = cursor;
+    l.complete = cursor === null;
+    l.loading = false;
+    l.anchor = anchor;
+    l.version.update((v) => v + 1);
+  }
+
+  /**
+   * Discard a window and return the channel to the live tail.
+   *
+   * Empties the log so the caller's next history fetch loads the newest page,
+   * rather than trying to bridge from wherever the window happened to end.
+   */
+  resetToLive(channel: Id): void {
+    const l = this.log(channel);
+    l.messages = [];
+    l.index.clear();
+    l.cursor = null;
+    l.complete = false;
+    l.loading = false;
+    l.anchor = null;
+    l.version.update((v) => v + 1);
+  }
+
   private patchMessage(channel: Id, id: Id, patch: (m: Message) => Message): void {
     const l = this.log(channel);
     const at = l.index.get(id);
@@ -299,7 +353,11 @@ export class Store {
 
     if ('msg' in frame) {
       const m = frame.msg.m;
-      this.addMessage(m);
+      // Not appended while the log is a historical window: there is a gap
+      // between it and the present, so the newest message would render as
+      // though it followed the one above it. `last_message` still advances, so
+      // the sidebar and badges stay correct.
+      if (this.log(m.ch).anchor === null) this.addMessage(m);
       this.bumpChannelLast(m.ch, m.id);
 
       // Reconcile an optimistic echo: same author, same channel, same text.

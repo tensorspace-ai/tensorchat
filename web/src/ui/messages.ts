@@ -40,6 +40,7 @@ export type MessageActions = {
   react: (message: Id, emoji: string, on: boolean) => void;
   setPin: (message: Id, on: boolean) => void;
   setSaved: (message: Id, on: boolean) => void;
+  copyLink: (channel: Id, message: Id) => void;
   openThread: (root: Id) => void;
   edit: (message: Id, body: string) => void;
   remove: (message: Id) => void;
@@ -70,6 +71,10 @@ export function MessageList(store: Store, actions: MessageActions): HTMLElement 
     },
   });
 
+  // Which anchor this list has already scrolled to, so paging older inside a
+  // window does not yank the viewport back to the anchor on every page.
+  let scrolledTo: Id | null = null;
+
   // Load older history when the reader approaches the top.
   let loadArmed = true;
   viewport.addEventListener('scroll', () => {
@@ -99,10 +104,25 @@ export function MessageList(store: Store, actions: MessageActions): HTMLElement 
     // message.
     store.pins();
     store.savedIds();
+    store.highlight();
 
     const rows = buildRows(store, channel, log.messages);
     const wasPinned = list.isPinnedToBottom();
     list.setItems(rows);
+
+    // A window loaded around some older message opens *on* that message rather
+    // than at the bottom, which for a historical excerpt would be an arbitrary
+    // place to land.
+    const anchor = log.anchor;
+    if (anchor && anchor !== scrolledTo) {
+      const at = rows.findIndex((r) => r.kind === 'message' && r.m.id === anchor);
+      if (at >= 0) {
+        scrolledTo = anchor;
+        list.scrollToIndex(at, 'start');
+        return;
+      }
+    }
+    if (!anchor) scrolledTo = null;
     if (wasPinned) list.scrollToBottom();
   });
 
@@ -197,6 +217,9 @@ export function renderMessage(
       m.del ? 'deleted' : '',
       mentionsMe ? 'mentions-me' : '',
       pinned ? 'pinned' : '',
+      // Flashes once after a jump, so the message you asked for is obvious
+      // among its neighbours.
+      store.highlight() === m.id ? 'highlighted' : '',
     ]
       .filter(Boolean)
       .join(' '),
@@ -377,6 +400,18 @@ function hoverActions(store: Store, actions: MessageActions, m: Message): HTMLEl
       'button',
       { class: 'action', title: 'Reply in thread', on: { click: () => actions.openThread(m.id) } },
       icon(ICONS.thread, 14),
+    ),
+  );
+
+  bar.appendChild(
+    el(
+      'button',
+      {
+        class: 'action',
+        title: 'Copy link to message',
+        on: { click: () => actions.copyLink(m.ch, m.id) },
+      },
+      icon(ICONS.link, 14),
     ),
   );
 

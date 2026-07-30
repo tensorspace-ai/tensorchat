@@ -157,6 +157,19 @@ export const api = {
     );
   },
 
+  /**
+   * A window of history centred on one message, for jumping to a search hit or
+   * following a permalink. `next_cursor` pages older from the window's edge,
+   * exactly as it does for an ordinary page.
+   */
+  historyAround: (channel: Id, around: Id, limit = 50) => {
+    const q = new URLSearchParams({ limit: String(limit), around });
+    return request<{ messages: Message[]; next_cursor: Id | null }>(
+      'GET',
+      `/api/channels/${channel}/messages?${q}`,
+    );
+  },
+
   thread: (root: Id) => request<Message[]>('GET', `/api/threads/${root}`),
 
   /** A channel's pinned messages, hydrated and newest first. */

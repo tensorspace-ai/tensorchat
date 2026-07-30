@@ -532,6 +532,9 @@ async fn open_dm(
 pub struct HistoryQuery {
     /// Exclusive cursor: return messages older than this id.
     before: Option<Id>,
+    /// Return a window *centred* on this id instead of a page ending at
+    /// `before`. Used to jump to a search hit or follow a permalink.
+    around: Option<Id>,
     limit: Option<u32>,
 }
 
@@ -549,7 +552,13 @@ async fn history(
     Query(q): Query<HistoryQuery>,
 ) -> ApiResult<Json<HistoryRes>> {
     let (uid, limit) = (u.id, q.limit.unwrap_or(50));
-    let page = st.db(move |s| s.history(id, uid, q.before, limit)).await?;
+    let page = match q.around {
+        Some(anchor) => {
+            st.db(move |s| s.history_around(id, uid, anchor, limit))
+                .await?
+        }
+        None => st.db(move |s| s.history(id, uid, q.before, limit)).await?,
+    };
     Ok(Json(HistoryRes {
         messages: page.messages,
         next_cursor: page.next_cursor,

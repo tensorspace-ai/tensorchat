@@ -1170,6 +1170,119 @@ async fn direct_messages_are_deduplicated_and_private() {
 }
 
 #[tokio::test]
+async fn history_can_be_fetched_around_a_message() {
+    let app = App::new();
+    let (alice, _) = app.account("alice").await;
+    let (_, channel) = app
+        .send(
+            "POST",
+            "/api/channels",
+            Some(&alice),
+            Some(json!({ "name": "general" })),
+        )
+        .await;
+    let ch = channel["id"].as_str().unwrap();
+
+    let mut ids = Vec::new();
+    for i in 0..30 {
+        let (_, m) = app
+            .send(
+                "POST",
+                &format!("/api/channels/{ch}/messages"),
+                Some(&alice),
+                Some(json!({ "body": format!("message {i}") })),
+            )
+            .await;
+        ids.push(m["id"].as_str().unwrap().to_string());
+    }
+    let anchor = &ids[10];
+
+    let (status, page) = app
+        .send(
+            "GET",
+            &format!("/api/channels/{ch}/messages?around={anchor}&limit=10"),
+            Some(&alice),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let got: Vec<&str> = page["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["id"].as_str().unwrap())
+        .collect();
+
+    assert_eq!(got.len(), 10);
+    assert!(got.contains(&anchor.as_str()), "the anchor must be present");
+    // Messages from both sides of it, which is the whole point — a `before`
+    // page could only ever have shown what came earlier.
+    assert!(got.contains(&ids[13].as_str()), "newer neighbours");
+    assert!(got.contains(&ids[7].as_str()), "older neighbours");
+    assert!(page["next_cursor"].is_string(), "can still page older");
+}
+
+#[tokio::test]
+async fn an_around_anchor_cannot_reach_into_another_channel() {
+    let app = App::new();
+    let (alice, _) = app.account("alice").await;
+    let (bob, bob_id) = app.account("bob").await;
+
+    // A private channel bob is not in, and a public one he is.
+    let (_, private) = app
+        .send(
+            "POST",
+            "/api/channels",
+            Some(&alice),
+            Some(json!({ "name": "secrets", "private": true })),
+        )
+        .await;
+    let secret_ch = private["id"].as_str().unwrap();
+    let (_, secret_msg) = app
+        .send(
+            "POST",
+            &format!("/api/channels/{secret_ch}/messages"),
+            Some(&alice),
+            Some(json!({ "body": "the passphrase is hunter2" })),
+        )
+        .await;
+    let secret_id = secret_msg["id"].as_str().unwrap();
+
+    let (_, open) = app
+        .send(
+            "POST",
+            "/api/channels",
+            Some(&alice),
+            Some(json!({ "name": "general", "members": [bob_id] })),
+        )
+        .await;
+    let open_ch = open["id"].as_str().unwrap();
+
+    // Only the *channel* is authorized, so an anchor belonging elsewhere must
+    // not be able to drag that channel's neighbours into the response.
+    let (status, _) = app
+        .send(
+            "GET",
+            &format!("/api/channels/{open_ch}/messages?around={secret_id}"),
+            Some(&bob),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // And naming the private channel directly is still forbidden.
+    let (status, _) = app
+        .send(
+            "GET",
+            &format!("/api/channels/{secret_ch}/messages?around={secret_id}"),
+            Some(&bob),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn messages_can_be_pinned_and_unpinned() {
     let app = App::new();
     let (alice, _) = app.account("alice").await;

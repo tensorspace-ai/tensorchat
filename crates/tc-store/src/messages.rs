@@ -332,6 +332,104 @@ impl Store {
         })
     }
 
+    /// A window of history centred on one message, for jumping to a search hit
+    /// or following a permalink.
+    ///
+    /// Two range scans rather than one, because "the messages around X" is two
+    /// different queries sharing an anchor: everything older runs backwards
+    /// from it, everything newer runs forwards. The primary key serves both —
+    /// the descending index for the first, its natural order for the second —
+    /// so neither needs an offset, a sort, or a timestamp column.
+    ///
+    /// Returns messages newest-first like [`Store::history`], so the client's
+    /// existing "page older" path keeps working from `next_cursor` unchanged.
+    /// `None` for that cursor still means the channel has been read back to its
+    /// first message.
+    pub fn history_around(
+        &self,
+        channel: Id,
+        viewer: Id,
+        anchor: Id,
+        limit: u32,
+    ) -> Result<HistoryPage> {
+        if !self.is_member(channel, viewer)? {
+            return Err(Error::Forbidden);
+        }
+        // The anchor must be in the channel the caller named. Without this, a
+        // message id from a private channel could be used to make this return
+        // that channel's neighbours, since only `channel` is authorized above.
+        let anchor_channel: Option<i64> = {
+            let conn = self.conn()?;
+            conn.prepare_cached("SELECT channel_id FROM messages WHERE id = ?")?
+                .query_row([to_sql(anchor)], |r| r.get(0))
+                .optional()?
+        };
+        if anchor_channel != Some(to_sql(channel)) {
+            return Err(Error::NotFound);
+        }
+
+        let limit = limit.clamp(2, MAX_PAGE) as usize;
+        let conn = self.conn()?;
+
+        // Each side is fetched with the *whole* budget rather than half of it,
+        // and the window is balanced afterwards in memory. Splitting the budget
+        // up front would under-fill whenever the anchor sits near either end of
+        // a channel — jumping to a channel's first message would return half a
+        // screen and stop. Both scans are bounded by MAX_PAGE over a hot index,
+        // so fetching a surplus costs far less than a third round trip would.
+        //
+        // `id <= anchor` on the backward scan, so the anchor arrives with it.
+        let mut back = conn.prepare_cached(&format!(
+            "SELECT {MSG_COLS} FROM messages \
+             WHERE channel_id = ? AND id <= ? AND thread_root IS NULL \
+             ORDER BY id DESC LIMIT ?"
+        ))?;
+        let older: Vec<Message> = back
+            .query_map(
+                // One extra, so "is there an older page?" is answered by the
+                // scan rather than by a second COUNT.
+                params![to_sql(channel), to_sql(anchor), limit as i64 + 1],
+                map_message,
+            )?
+            .collect::<rusqlite::Result<_>>()?;
+        drop(back);
+
+        let mut forward = conn.prepare_cached(&format!(
+            "SELECT {MSG_COLS} FROM messages \
+             WHERE channel_id = ? AND id > ? AND thread_root IS NULL \
+             ORDER BY id ASC LIMIT ?"
+        ))?;
+        let newer: Vec<Message> = forward
+            .query_map(
+                params![to_sql(channel), to_sql(anchor), limit as i64],
+                map_message,
+            )?
+            .collect::<rusqlite::Result<_>>()?;
+        drop(forward);
+        drop(conn);
+
+        // Aim for half the window on each side, then let whichever side is
+        // short hand its unused budget to the other.
+        let mut take_newer = newer.len().min(limit / 2);
+        let take_older = (limit - take_newer).min(older.len());
+        take_newer = (take_newer + (limit - take_newer - take_older)).min(newer.len());
+
+        // The cursor is the oldest row we kept, so paging with `before` picks up
+        // strictly older ones. `None` once the channel is read to its start.
+        let next_cursor = (older.len() > take_older).then(|| older[take_older - 1].id);
+
+        // The forward half arrived ascending; reversing it keeps the whole page
+        // newest-first, as every other history response is.
+        let mut page: Vec<Message> = newer.into_iter().take(take_newer).rev().collect();
+        page.extend(older.into_iter().take(take_older));
+
+        self.hydrate(&mut page, viewer)?;
+        Ok(HistoryPage {
+            messages: page,
+            next_cursor,
+        })
+    }
+
     /// Every reply in a thread, oldest first, plus the root message.
     pub fn thread(&self, root: Id, viewer: Id) -> Result<Vec<Message>> {
         let root_msg = self.message(root)?;
@@ -595,6 +693,127 @@ mod tests {
             mentions: &[],
         })
         .unwrap()
+    }
+
+    #[test]
+    fn history_around_centres_the_window_on_the_anchor() {
+        let f = fx();
+        let all: Vec<Message> = (0..40)
+            .map(|i| post(&f, f.alice, &format!("m{i}")))
+            .collect();
+        let anchor = all[20].id;
+
+        let page = f.s.history_around(f.ch, f.alice, anchor, 10).unwrap();
+        let ids: Vec<Id> = page.messages.iter().map(|m| m.id).collect();
+
+        assert_eq!(ids.len(), 10);
+        assert!(
+            ids.contains(&anchor),
+            "the anchor must be in its own window"
+        );
+        // Newest-first, like every other history response.
+        assert!(ids.windows(2).all(|w| w[0] > w[1]), "must be descending");
+        // Balanced either side: 5 newer, then the anchor and 4 older.
+        assert_eq!(ids[0], all[25].id);
+        assert_eq!(ids[9], all[16].id);
+        // And paging older from the cursor continues where the window stopped.
+        assert_eq!(page.next_cursor, Some(all[16].id));
+        let older = f.s.history(f.ch, f.alice, page.next_cursor, 5).unwrap();
+        assert_eq!(older.messages[0].id, all[15].id);
+    }
+
+    #[test]
+    fn history_around_clamps_at_the_ends_of_a_channel() {
+        let f = fx();
+        let all: Vec<Message> = (0..6)
+            .map(|i| post(&f, f.alice, &format!("m{i}")))
+            .collect();
+
+        // Anchored on the first message: nothing older exists, so the window is
+        // short rather than padded, and there is no older cursor.
+        let first = f.s.history_around(f.ch, f.alice, all[0].id, 10).unwrap();
+        assert_eq!(first.messages.last().unwrap().id, all[0].id);
+        assert_eq!(first.next_cursor, None);
+
+        // Anchored on the last: nothing newer, and the anchor is at the top.
+        let last = f.s.history_around(f.ch, f.alice, all[5].id, 10).unwrap();
+        assert_eq!(last.messages[0].id, all[5].id);
+        assert_eq!(last.messages.len(), 6);
+    }
+
+    #[test]
+    fn history_around_hydrates_and_excludes_thread_replies() {
+        let f = fx();
+        let root = post(&f, f.alice, "root");
+        f.s.set_reaction(root.id, f.bob, "👍", true).unwrap();
+        f.s.insert_message(NewMessage {
+            id: f.g.next(),
+            channel_id: f.ch,
+            author_id: f.bob,
+            body: "a reply",
+            thread_root: Some(root.id),
+            attachments: &[],
+            mentions: &[],
+        })
+        .unwrap();
+        let after = post(&f, f.alice, "later");
+
+        let page = f.s.history_around(f.ch, f.alice, root.id, 10).unwrap();
+        let ids: Vec<Id> = page.messages.iter().map(|m| m.id).collect();
+        // Replies live in the thread pane, exactly as in `history`.
+        assert_eq!(ids, vec![after.id, root.id]);
+        assert_eq!(page.messages[1].reactions.len(), 1, "must be hydrated");
+        assert_eq!(page.messages[1].reply_count, 1);
+    }
+
+    #[test]
+    fn history_around_refuses_a_non_member() {
+        let f = fx();
+        let m = post(&f, f.alice, "private");
+        let carol = f.s.create_user(f.g.next(), "carol", "C", "h").unwrap().id;
+        assert!(matches!(
+            f.s.history_around(f.ch, carol, m.id, 10),
+            Err(Error::Forbidden)
+        ));
+    }
+
+    #[test]
+    fn history_around_refuses_an_anchor_from_another_channel() {
+        // Only `channel` is authorized, so an anchor belonging elsewhere must
+        // not be able to pull that channel's neighbours into the response.
+        let f = fx();
+        let other =
+            f.s.create_channel(NewChannel {
+                id: f.g.next(),
+                kind: ChannelKind::Private,
+                name: "secrets",
+                topic: "",
+                created_by: f.alice,
+                created_at: 1,
+                members: vec![],
+            })
+            .unwrap()
+            .id;
+        let elsewhere =
+            f.s.insert_message(NewMessage {
+                id: f.g.next(),
+                channel_id: other,
+                author_id: f.alice,
+                body: "not for this channel",
+                thread_root: None,
+                attachments: &[],
+                mentions: &[],
+            })
+            .unwrap();
+
+        assert!(matches!(
+            f.s.history_around(f.ch, f.alice, elsewhere.id, 10),
+            Err(Error::NotFound)
+        ));
+        assert!(matches!(
+            f.s.history_around(f.ch, f.alice, Id(999_999), 10),
+            Err(Error::NotFound)
+        ));
     }
 
     #[test]

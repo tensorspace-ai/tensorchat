@@ -328,7 +328,7 @@ export function PinnedPane(store: Store, actions: MessageActions): HTMLElement {
 export function SavedPane(
   store: Store,
   actions: MessageActions,
-  onOpenChannel: (channel: Id) => void,
+  onOpenMessage: (channel: Id, message: Id) => void,
 ): HTMLElement {
   const body = el('div', { class: 'pinned-body' });
   const root = el(
@@ -392,8 +392,8 @@ export function SavedPane(
             text: channel
               ? `${channel.k === 'public' ? '#' : ''}${store.channelTitle(channel)}`
               : 'a channel',
-            title: 'Go to channel',
-            on: { click: () => onOpenChannel(m.ch) },
+            title: 'Go to this message',
+            on: { click: () => onOpenMessage(m.ch, m.id) },
           }),
           renderMessage(store, actions, m, false),
         );

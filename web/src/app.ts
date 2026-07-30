@@ -27,6 +27,9 @@ import {
 /** Messages fetched per history page. */
 const PAGE_SIZE = 50;
 
+/** How long a jumped-to message stays highlighted. Matches the CSS fade. */
+const HIGHLIGHT_MS = 2200;
+
 export function mount(root: HTMLElement): void {
   const token = api === undefined ? null : localStorage.getItem('tc_token');
 
@@ -97,12 +100,71 @@ function start(root: HTMLElement): void {
     }
   }
 
+  // -- Jumping to a message -----------------------------------------------
+
+  /**
+   * Open a channel positioned on one message, from a search hit, a pinned or
+   * saved item, or a permalink.
+   *
+   * The log becomes a *window* rather than the live tail — see `ChannelLog.anchor`
+   * — so a "Jump to latest" bar appears until the reader returns to the present.
+   */
+  async function jumpToMessage(channel: Id, message: Id): Promise<void> {
+    store.currentChannel.set(channel);
+    store.openThread.set(null);
+    void loadPins(channel);
+    try {
+      const page = await api.historyAround(channel, message, PAGE_SIZE);
+      store.showAround(channel, message, page.messages, page.next_cursor);
+      store.highlight.set(message);
+      // Cleared after the flash, so jumping to the same message twice flashes
+      // twice instead of silently doing nothing the second time.
+      setTimeout(() => {
+        if (store.highlight() === message) store.highlight.set(null);
+      }, HIGHLIGHT_MS);
+    } catch {
+      // A message that has been deleted, or that lives in a channel this user
+      // has since left. Fall back to opening the channel normally rather than
+      // leaving them on a blank pane.
+      openChannel(channel);
+    }
+  }
+
+  /** Leave a historical window and reload the newest page. */
+  function jumpToLatest(): void {
+    const channel = store.currentChannel();
+    if (!channel) return;
+    store.highlight.set(null);
+    store.resetToLive(channel);
+    void loadHistory(channel);
+  }
+
+  /**
+   * `#/c/{channel}/{message}` — a permalink. Read once at startup and on every
+   * hash change, so a pasted link works in an already-open tab too.
+   */
+  function openFromHash(): boolean {
+    const m = /^#\/c\/(\d+)(?:\/(\d+))?$/.exec(location.hash);
+    if (!m) return false;
+    const [, channel, message] = m;
+    if (message) void jumpToMessage(channel, message);
+    else openChannel(channel);
+    return true;
+  }
+
+  window.addEventListener('hashchange', () => openFromHash());
+
   // -- Navigation ---------------------------------------------------------
 
   function openChannel(id: Id): void {
     store.currentChannel.set(id);
     store.openThread.set(null);
+    store.highlight.set(null);
     const log = store.log(id);
+    // Opening a channel deliberately means "take me to this channel", so a
+    // window left over from an earlier jump is discarded rather than returned
+    // to. Jumping back is one click from wherever the link was.
+    if (log.anchor !== null) store.resetToLive(id);
     if (log.messages.length === 0) void loadHistory(id);
     void loadPins(id);
     markCurrentRead();
@@ -173,6 +235,13 @@ function start(root: HTMLElement): void {
       // reaches this user's other tabs.
       store.setSavedLocal(id, on);
       void api.setSaved(id, on).catch(() => store.setSavedLocal(id, !on));
+    },
+    copyLink: (channel, message) => {
+      const url = `${location.origin}${location.pathname}#/c/${channel}/${message}`;
+      // `writeText` needs a secure context; over plain HTTP on a LAN address it
+      // rejects, so fall back to putting the link where it can still be copied
+      // by hand rather than failing silently.
+      void navigator.clipboard?.writeText(url).catch(() => prompt('Link to message', url));
     },
     openThread: (rootId) => store.openThread.set(rootId),
     edit: (id, body) => {
@@ -262,8 +331,12 @@ function start(root: HTMLElement): void {
 
   const memberPane = MemberList(store, (user) => void openDmWith(user));
   const pinnedPane = PinnedPane(store, messageActions);
-  const savedPane = SavedPane(store, messageActions, openChannel);
-  const search = SearchOverlay(store, (channel) => openChannel(channel));
+  const savedPane = SavedPane(store, messageActions, (channel, message) =>
+    void jumpToMessage(channel, message),
+  );
+  // The overlay has always passed the hit's message id; until history could be
+  // fetched around an anchor there was nothing to do with it but drop it.
+  const search = SearchOverlay(store, (channel, message) => void jumpToMessage(channel, message));
 
   const channelHeader = ChannelHeader(store, {
     toggleMembers: () => (memberPane as HTMLElement & { toggle?: () => void }).toggle?.(),
@@ -279,6 +352,7 @@ function start(root: HTMLElement): void {
   });
 
   const typingLine = TypingIndicator(store);
+  const anchorBar = AnchorBar(store, jumpToLatest);
 
   replace(root, [
     el(
@@ -290,6 +364,7 @@ function start(root: HTMLElement): void {
         { class: 'main' },
         channelHeader,
         messageList,
+        anchorBar,
         typingLine,
         composer,
       ),
@@ -311,10 +386,15 @@ function start(root: HTMLElement): void {
     .then((list) => store.setSaved(list.map((m) => m.id)))
     .catch(() => {});
 
-  // Open the first channel once the workspace snapshot arrives.
+  // Open whatever the URL asks for, or the first channel, once the workspace
+  // snapshot arrives. A permalink wins: it is the more specific request, and
+  // it is what the person clicking the link actually wanted to see.
+  let opened = false;
   effect(() => {
     const channels = store.sortedChannels();
-    if (!store.currentChannel() && channels.length > 0) openChannel(channels[0].id);
+    if (opened || store.currentChannel() || channels.length === 0) return;
+    opened = true;
+    if (!openFromHash()) openChannel(channels[0].id);
   });
 
   // Unread badge in the tab title.
@@ -438,6 +518,41 @@ function ChannelHeader(
           icon(ICONS.people, 17),
         ),
       ),
+    ]);
+  });
+  return root;
+}
+
+/**
+ * "You are viewing older messages" — shown while the open channel's log is a
+ * window around some older message rather than the live tail.
+ *
+ * Necessary rather than decorative: while anchored, new messages are
+ * deliberately not appended, so without this the channel would look as though
+ * it had gone silent.
+ */
+function AnchorBar(
+  store: typeof import('./store.ts').store,
+  onJumpToLatest: () => void,
+): HTMLElement {
+  const root = el('div', { class: 'anchor-bar', hidden: true });
+  effect(() => {
+    const channel = store.currentChannel();
+    if (!channel) {
+      root.hidden = true;
+      return;
+    }
+    const log = store.log(channel);
+    log.version();
+    root.hidden = log.anchor === null;
+    if (root.hidden) return;
+    replace(root, [
+      el('span', { text: 'Viewing older messages' }),
+      el('button', {
+        class: 'anchor-jump',
+        text: 'Jump to latest',
+        on: { click: onJumpToLatest },
+      }),
     ]);
   });
   return root;

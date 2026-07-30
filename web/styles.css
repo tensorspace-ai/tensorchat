@@ -836,6 +836,61 @@ ul, ol {
   opacity: 0.75;
 }
 
+/* Flashes once after a jump, so the message you asked for is findable among
+   its neighbours. Fades out on its own rather than staying lit, because after
+   a second or two you have found it and the emphasis is just noise. */
+.message.highlighted {
+  animation: message-flash 2.2s var(--ease) forwards;
+}
+
+@keyframes message-flash {
+  0%, 55% {
+    background: var(--accent-soft);
+    box-shadow: inset 3px 0 0 0 var(--accent);
+  }
+  100% {
+    background: transparent;
+    box-shadow: inset 3px 0 0 0 transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message.highlighted {
+    animation: none;
+    background: var(--accent-soft);
+    box-shadow: inset 3px 0 0 0 var(--accent);
+  }
+}
+
+/* "Viewing older messages". Necessary rather than decorative: while the log is
+   a window, new messages are deliberately not appended, so without this the
+   channel would look as though it had gone quiet. */
+.anchor-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex: none;
+  padding: 6px 12px;
+  background: var(--accent-softer);
+  border-top: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: var(--text-md);
+}
+
+.anchor-jump {
+  padding: 3px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+.anchor-jump:hover {
+  background: var(--accent-hover);
+}
+
 /* Optimistic echo, still in flight. */
 .message.pending {
   opacity: 0.55;
