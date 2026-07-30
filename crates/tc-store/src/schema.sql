@@ -1,4 +1,4 @@
--- TensorChat schema (version 8).
+-- TensorChat schema (version 9).
 --
 -- Conventions:
 --   * Every `id` is a Snowflake (see tc-core::id). Because they are monotonic,
@@ -73,7 +73,10 @@ CREATE TABLE invites (
     -- of a link that is still live.
     id         INTEGER NOT NULL,
     label      TEXT    NOT NULL DEFAULT '',
-    created_by INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    -- NULL when minted from the operator console on a workspace that had no
+    -- administrator to attribute it to — the case that lets the first person
+    -- into a closed, empty deployment.
+    created_by INTEGER REFERENCES users (id) ON DELETE CASCADE,
     created_at INTEGER NOT NULL,
     -- NULL never expires.
     expires_at INTEGER,

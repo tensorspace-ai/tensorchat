@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Operator console** — `tc-server invite`, `promote` and `demote`, run against
+  the database rather than the API. Closes the gap where a workspace started
+  with `TC_OPEN_REGISTRATION=false` had nobody who could mint the first invite:
+  the documented workaround was to start open, register, and restart closed,
+  which left a window in which anyone who found the address became the
+  administrator. `invite` mints a link through the existing invite machinery, so
+  the first person picks their own handle and password and the ordinary
+  "first human becomes administrator" rule does the rest. `promote` replaces the
+  `sqlite3 "UPDATE users SET admin = 1"` the README used to recommend. The
+  commands need no authentication because anyone able to run them can already
+  read the database; they add no network surface and no new credential type.
+  The server now also reports at startup when nobody can sign in, or when there
+  is no active administrator, and names the command that fixes it.
 - **Web Push and PWA** — mentions and direct messages now notify with no tab
   open. The push itself carries **no payload**: the server sends an empty
   VAPID-signed message and the service worker fetches the content from
@@ -93,6 +106,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `DELETE /api/channels/{id}/members/{user}`, with an "Add people" control in the
   member pane. Private channels previously had no way in after creation: `join`
   refuses them by design, and nothing else could grant membership.
+
+### Changed
+
+- `invites.created_by` is now nullable (schema 9). It assumed every invite was
+  minted by an administrator through the API, which the bootstrap case cannot
+  satisfy — a fresh closed workspace has no accounts at all. The alternatives
+  were a synthetic "system" account that every mention search and member list
+  would have to hide, or an id that violates the foreign key.
 
 ### Fixed
 

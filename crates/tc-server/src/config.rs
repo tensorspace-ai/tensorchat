@@ -36,6 +36,11 @@ pub struct Config {
     pub auth_burst: f32,
     /// Sustained refill rate for the same limiter, in attempts per second.
     pub auth_per_second: f32,
+    /// How people actually reach this server, e.g. `https://chat.example.com`.
+    /// The server never needs it — it sits behind whatever proxy the operator
+    /// put there — but `tc-server invite` has to print a link somebody can
+    /// click, and the bind address is usually not it.
+    pub public_url: Option<String>,
     /// Contact address embedded in every VAPID token, as a `mailto:` or URL.
     /// Push services want somewhere to complain to; setting it to an empty
     /// string switches Web Push off entirely.
@@ -55,6 +60,7 @@ impl Default for Config {
             permissive_cors: false,
             auth_burst: 10.0,
             auth_per_second: 0.5,
+            public_url: None,
             // On by default with a placeholder contact: push is useless without
             // it, and a self-hosted instance should not need configuration to
             // get notifications working.
@@ -102,6 +108,10 @@ impl Config {
         }
         if let Ok(v) = std::env::var("TC_AUTH_PER_SECOND") {
             c.auth_per_second = v.parse().map_err(|e| format!("TC_AUTH_PER_SECOND: {e}"))?;
+        }
+        if let Ok(v) = std::env::var("TC_PUBLIC_URL") {
+            let v = v.trim().to_string();
+            c.public_url = (!v.is_empty()).then_some(v);
         }
         if let Ok(v) = std::env::var("TC_PUSH_CONTACT") {
             let v = v.trim().to_string();

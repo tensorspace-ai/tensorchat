@@ -114,7 +114,7 @@ promoting an arbitrary account would be a surprising grant of privilege. Choose
 one deliberately:
 
 ```sh
-sqlite3 tensorchat.db "UPDATE users SET admin = 1 WHERE handle = 'you';"
+tc-server promote you
 ```
 
 The database (`tensorchat.db`) and uploads (`blobs/`) are created on first run.
@@ -151,6 +151,7 @@ All configuration is environment variables. Everything has a working default.
 | `TC_OPEN_REGISTRATION` | `true` | Set `false` to close signups. Invite links still work — see below. |
 | `TC_AUTH_BURST` | `10` | Login/register attempts allowed per client address before throttling. |
 | `TC_AUTH_PER_SECOND` | `0.5` | Refill rate for that allowance. Raise both behind a proxy that hides client addresses. |
+| `TC_PUBLIC_URL` | *(unset)* | How people reach this server, e.g. `https://chat.example.com`. Used for links printed by `tc-server invite`. |
 | `TC_PUSH_CONTACT` | `mailto:admin@localhost` | Contact address in VAPID tokens. Set to an empty string to disable Web Push. |
 | `TC_PERMISSIVE_CORS` | `false` | Development only. |
 | `RUST_LOG` | `tc_server=info` | Log filter. |
@@ -158,20 +159,48 @@ All configuration is environment variables. Everything has a working default.
 ### Closing registration
 
 `TC_OPEN_REGISTRATION=false` shuts the public sign-up form. Invite links still
-work, so this is the setting most deployments want — but claim the
-administrator account *before* you close it, because an empty closed workspace
-has nobody who can mint the first invite:
+work, so this is the setting most deployments want — and it can be set from the
+very first boot. Mint the first link from the operator console:
 
 ```sh
-# 1. Start open, register yourself at http://127.0.0.1:8080 (you become admin).
-# 2. Restart with registration closed:
-TC_OPEN_REGISTRATION=false cargo run --release -p tc-server
-# 3. Preferences → Invite people → Create invite link.
+TC_OPEN_REGISTRATION=false tc-server     # start it closed, from empty
+tc-server invite                         # in another shell; prints a link
 ```
+
+Whoever opens that link first picks their own handle and password and becomes
+the administrator. There is no window in which the sign-up form is open to
+anyone who finds the address.
 
 An invite grants nothing but the right to create an account; the account it
 makes is an ordinary member. Links are stored as a SHA-256 digest and shown
 exactly once, so a lost link is reissued rather than recovered.
+
+### Operator console
+
+The same binary runs a few commands directly against the database, for the
+things that cannot go through the API because they are what *creates* the
+authority the API checks:
+
+```sh
+tc-server invite [--uses N] [--days N] [--label TEXT] [--url ORIGIN]
+tc-server promote <handle>
+tc-server demote <handle>
+tc-server help
+```
+
+They read the same environment as the server (`TC_DB` and friends), so they act
+on the same database with no extra arguments — including while it is running,
+since SQLite's WAL mode allows a second writer. Under Docker:
+
+```sh
+docker compose exec tensorchat tc-server invite
+```
+
+These require no authentication, and deliberately so: anyone who can run this
+binary against the database can already read every message in it. Filesystem
+access *is* the authentication, and these commands grant nothing it did not
+already grant. Set `TC_PUBLIC_URL` so the printed link points at the name people
+actually use rather than the bind address.
 
 ### Notifications
 

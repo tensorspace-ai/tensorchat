@@ -52,7 +52,7 @@ pub use search::SearchQuery;
 pub use tokens::ApiToken;
 
 /// Schema version embedded in the database via `PRAGMA user_version`.
-const SCHEMA_VERSION: i32 = 8;
+const SCHEMA_VERSION: i32 = 9;
 
 /// Incremental upgrades, each paired with the version it produces.
 ///
@@ -78,6 +78,10 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (6, include_str!("migrations/006_api_tokens.sql")),
     (7, include_str!("migrations/007_invites.sql")),
     (8, include_str!("migrations/008_push.sql")),
+    (
+        9,
+        include_str!("migrations/009_invite_creator_optional.sql"),
+    ),
 ];
 
 pub type Result<T> = std::result::Result<T, Error>;

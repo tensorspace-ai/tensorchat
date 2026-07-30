@@ -626,7 +626,7 @@ async fn create_invite(
                 id,
                 token_hash: &hash,
                 label: &label,
-                created_by: by,
+                created_by: Some(by),
                 created_at: now,
                 expires_at,
                 max_uses,

@@ -324,7 +324,7 @@ fn a_single_use_invite_admits_exactly_one_racing_account() {
             id: fx.ids.next(),
             token_hash: b"race",
             label: "",
-            created_by: fx.users[0],
+            created_by: Some(fx.users[0]),
             created_at: 1,
             expires_at: None,
             max_uses: seats,

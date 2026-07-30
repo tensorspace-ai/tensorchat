@@ -7,10 +7,39 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use tc_server::cli::{self, Command};
 use tc_server::{AppState, Config, Shared, build_router};
 
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let cfg = Config::from_env().map_err(|e| format!("configuration error: {e}"))?;
+
+    // Dispatch before starting a runtime. The operator commands are synchronous
+    // database work with no server behind them, and spinning up tokio to print
+    // an invite link would be pure ceremony.
+    let command = cli::parse(std::env::args().skip(1)).map_err(|e| {
+        eprintln!("{e}");
+        std::process::exit(2);
+    })?;
+
+    if !matches!(command, Command::Serve) {
+        let store = cli::open_store(&cfg.db_path)?;
+        match cli::run(&store, &cfg, command) {
+            Ok(message) => {
+                println!("{}", message.trim_end());
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    serve(cfg)
+}
+
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn serve(cfg: Config) -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -18,8 +47,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .compact()
         .init();
-
-    let cfg = Config::from_env().map_err(|e| format!("configuration error: {e}"))?;
 
     // Create the directories we own before opening anything inside them, so a
     // fresh checkout runs with no setup step.
@@ -30,6 +57,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let store = tc_store::Store::open(&cfg.db_path)?;
     tracing::info!(db = %cfg.db_path.display(), "database ready");
+
+    // A workspace nobody can sign in to fails silently otherwise: the server
+    // comes up, serves a login page, and refuses every credential because there
+    // are none. Say so, and name the command that fixes it.
+    cli::warn_if_unreachable(&store, &cfg);
 
     // Web Push needs a stable VAPID keypair, minted into the database on first
     // run. A failure here disables push rather than stopping the server: chat

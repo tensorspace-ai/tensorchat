@@ -76,6 +76,34 @@ impl Store {
         })
     }
 
+    /// How many people (not bots) have accounts.
+    ///
+    /// Zero is the state a fresh install is in, and the one worth reporting at
+    /// startup when registration is closed: nobody can sign in, and nobody can
+    /// mint the invite that would let them.
+    pub fn human_count(&self) -> Result<u32> {
+        let conn = self.conn()?;
+        Ok(conn
+            .prepare_cached("SELECT count(*) FROM users WHERE bot = 0")?
+            .query_row([], |r| r.get::<_, i64>(0))? as u32)
+    }
+
+    /// Resolve a handle to its account, *including* deactivated ones.
+    ///
+    /// Deliberately unlike [`Store::user_for_login`] and
+    /// [`Store::ids_for_handles`], which both hide deactivated accounts so that
+    /// deactivation is undetectable from outside. This is for the operator
+    /// console, where the whole point is to act on an account that may well be
+    /// deactivated — and where "no such user" and "that user is switched off"
+    /// need to be different answers.
+    pub fn user_by_handle(&self, handle: &str) -> Result<Option<User>> {
+        let conn = self.conn()?;
+        Ok(conn
+            .prepare_cached(&format!("SELECT {USER_COLS} FROM users WHERE handle = ?"))?
+            .query_row([handle], map_user)
+            .optional()?)
+    }
+
     /// How many administrators the workspace has.
     ///
     /// Used to refuse the last one's own demotion or deactivation — a

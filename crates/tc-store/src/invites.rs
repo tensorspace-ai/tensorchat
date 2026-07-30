@@ -23,7 +23,9 @@ use crate::{Error, Result, Store, from_sql, to_sql};
 pub struct Invite {
     pub id: Id,
     pub label: String,
-    pub created_by: Id,
+    /// The administrator who minted it, or `None` when there was none — a
+    /// closed, empty workspace bootstrapped from the operator console.
+    pub created_by: Option<Id>,
     pub created_at: u64,
     /// `None` never expires.
     pub expires_at: Option<u64>,
@@ -58,7 +60,7 @@ fn map_invite(row: &rusqlite::Row<'_>) -> rusqlite::Result<Invite> {
     Ok(Invite {
         id: from_sql(row.get(0)?),
         label: row.get(1)?,
-        created_by: from_sql(row.get(2)?),
+        created_by: row.get::<_, Option<i64>>(2)?.map(from_sql),
         created_at: row.get::<_, i64>(3)? as u64,
         expires_at: row.get::<_, Option<i64>>(4)?.map(|v| v as u64),
         max_uses: row.get::<_, i64>(5)? as u32,
@@ -74,7 +76,8 @@ pub struct NewInvite<'a> {
     /// SHA-256 of the token. The token itself is never stored.
     pub token_hash: &'a [u8],
     pub label: &'a str,
-    pub created_by: Id,
+    /// `None` when nobody could be credited; see [`Invite::created_by`].
+    pub created_by: Option<Id>,
     pub created_at: u64,
     /// `None` never expires.
     pub expires_at: Option<u64>,
@@ -96,7 +99,7 @@ impl Store {
             new.token_hash,
             to_sql(new.id),
             new.label,
-            to_sql(new.created_by),
+            new.created_by.map(to_sql),
             new.created_at as i64,
             new.expires_at.map(|v| v as i64),
             new.max_uses as i64,
@@ -267,7 +270,7 @@ mod tests {
             id,
             token_hash: digest,
             label,
-            created_by: by,
+            created_by: Some(by),
             created_at: 100,
             expires_at,
             max_uses,
