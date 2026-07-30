@@ -1181,6 +1181,102 @@ async fn a_deleted_message_leaves_the_pinned_list() {
 }
 
 #[tokio::test]
+async fn saved_messages_are_private_and_leave_with_the_channel() {
+    let app = App::new();
+    let (alice, _) = app.account("alice").await;
+    let (bob, bob_id) = app.account("bob").await;
+
+    let (_, channel) = app
+        .send(
+            "POST",
+            "/api/channels",
+            Some(&alice),
+            Some(json!({ "name": "secrets", "private": true, "members": [bob_id] })),
+        )
+        .await;
+    let ch = channel["id"].as_str().unwrap();
+    let (_, msg) = app
+        .send(
+            "POST",
+            &format!("/api/channels/{ch}/messages"),
+            Some(&alice),
+            Some(json!({ "body": "the passphrase is hunter2" })),
+        )
+        .await;
+    let id = msg["id"].as_str().unwrap();
+
+    let (status, _) = app
+        .send(
+            "POST",
+            &format!("/api/messages/{id}/save"),
+            Some(&bob),
+            Some(json!({ "on": true })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (_, mine) = app.send("GET", "/api/saved", Some(&bob), None).await;
+    assert_eq!(mine.as_array().unwrap().len(), 1);
+    assert_eq!(mine[0]["id"], id);
+
+    // A save is private: alice saved nothing, even though it is her message.
+    let (_, hers) = app.send("GET", "/api/saved", Some(&alice), None).await;
+    assert!(hers.as_array().unwrap().is_empty());
+
+    // Losing access to the channel takes the message out of the saved list,
+    // or the list becomes a private window into a channel you were removed
+    // from.
+    app.send(
+        "DELETE",
+        &format!("/api/channels/{ch}/members/{bob_id}"),
+        Some(&alice),
+        None,
+    )
+    .await;
+    let (_, mine) = app.send("GET", "/api/saved", Some(&bob), None).await;
+    assert!(
+        mine.as_array().unwrap().is_empty(),
+        "a removed member must not keep reading via their saved list"
+    );
+}
+
+#[tokio::test]
+async fn saving_a_message_you_cannot_see_is_forbidden() {
+    let app = App::new();
+    let (alice, _) = app.account("alice").await;
+    let (bob, _) = app.account("bob").await;
+
+    let (_, channel) = app
+        .send(
+            "POST",
+            "/api/channels",
+            Some(&alice),
+            Some(json!({ "name": "secrets", "private": true })),
+        )
+        .await;
+    let ch = channel["id"].as_str().unwrap();
+    let (_, msg) = app
+        .send(
+            "POST",
+            &format!("/api/channels/{ch}/messages"),
+            Some(&alice),
+            Some(json!({ "body": "not for you" })),
+        )
+        .await;
+    let id = msg["id"].as_str().unwrap();
+
+    let (status, _) = app
+        .send(
+            "POST",
+            &format!("/api/messages/{id}/save"),
+            Some(&bob),
+            Some(json!({ "on": true })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn search_is_scoped_to_channels_you_belong_to() {
     let app = App::new();
     let (alice, _) = app.account("alice").await;

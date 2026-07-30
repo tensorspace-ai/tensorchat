@@ -153,6 +153,15 @@ export const api = {
   setPin: (message: Id, on: boolean) =>
     request<void>('POST', `/api/messages/${message}/pin`, { on }),
 
+  /**
+   * The caller's saved messages, newest first. Scoped by membership, so a
+   * channel you have left takes its messages with it.
+   */
+  saved: (limit = 200) => request<Message[]>('GET', `/api/saved?limit=${limit}`),
+
+  setSaved: (message: Id, on: boolean) =>
+    request<void>('POST', `/api/messages/${message}/save`, { on }),
+
   openDm: (users: Id[]) => request<Channel>('POST', '/api/dm', { users }),
 
   markRead: (channel: Id, upTo: Id) =>

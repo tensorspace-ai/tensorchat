@@ -1,4 +1,4 @@
--- TensorChat schema (version 2).
+-- TensorChat schema (version 3).
 --
 -- Conventions:
 --   * Every `id` is a Snowflake (see tc-core::id). Because they are monotonic,
@@ -130,6 +130,17 @@ CREATE TABLE pins (
     -- makes it a contiguous range. It also makes double-pinning impossible
     -- under a race, rather than something the application has to check for.
     PRIMARY KEY (channel_id, message_id)
+) STRICT, WITHOUT ROWID;
+
+-- Saved ("starred") messages. Purely per-user, so unlike `pins` this never
+-- touches the broadcast path.
+CREATE TABLE saved (
+    user_id    INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    message_id INTEGER NOT NULL REFERENCES messages (id) ON DELETE CASCADE,
+    saved_at   INTEGER NOT NULL,
+    -- User first: the only read is "everything I saved", which this makes a
+    -- contiguous range rather than a scan filtered by user.
+    PRIMARY KEY (user_id, message_id)
 ) STRICT, WITHOUT ROWID;
 
 CREATE TABLE attachments (

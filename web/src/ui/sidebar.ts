@@ -18,6 +18,7 @@ export type SidebarActions = {
   createChannel: () => void;
   browseChannels: () => void;
   newDm: () => void;
+  openSaved: () => void;
   openPreferences: () => void;
 };
 
@@ -48,6 +49,14 @@ export function Sidebar(store: Store, actions: SidebarActions): HTMLElement {
     const direct = channels.filter((c) => c.k === 'dm' || c.k === 'group');
 
     replace(channelList, [
+      // Above the channels, because saved messages are a cross-channel
+      // collection rather than one more channel.
+      el(
+        'button',
+        { class: 'channel-row shortcut-row', on: { click: actions.openSaved } },
+        icon(ICONS.bookmark, 15),
+        el('span', { class: 'channel-name', text: 'Saved' }),
+      ),
       section('Channels', ICONS.plus, actions.createChannel, [
         ...named.map((c) => channelRow(store, c, current, actions.open)),
         el('button', {

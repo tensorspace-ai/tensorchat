@@ -316,6 +316,98 @@ export function PinnedPane(store: Store, actions: MessageActions): HTMLElement {
   return root;
 }
 
+// -- Saved messages ------------------------------------------------------
+
+/**
+ * The viewer's saved messages, across every channel.
+ *
+ * The one view in the product that deliberately ignores which channel a
+ * message came from, so each row is labelled with its origin — without that
+ * the list reads as a pile of context-free sentences.
+ */
+export function SavedPane(
+  store: Store,
+  actions: MessageActions,
+  onOpenChannel: (channel: Id) => void,
+): HTMLElement {
+  const body = el('div', { class: 'pinned-body' });
+  const root = el(
+    'aside',
+    { class: 'pinned-pane', hidden: true, aria: { label: 'Saved messages' } },
+    el(
+      'div',
+      { class: 'pane-header' },
+      el('span', { class: 'pane-title', text: 'Saved' }),
+      el('button', {
+        class: 'icon-button',
+        text: '×',
+        title: 'Close',
+        on: { click: () => (root.hidden = true) },
+      }),
+    ),
+    body,
+  );
+
+  const messages = signal<Message[]>([]);
+
+  const load = () => {
+    void api
+      .saved()
+      .then((list) => {
+        messages.set(list);
+        store.setSaved(list.map((m) => m.id));
+      })
+      .catch(() => messages.set([]));
+  };
+
+  // Refetch when the set changes — including from another tab, which arrives
+  // as a `saved` frame.
+  effect(() => {
+    store.savedIds();
+    if (!root.hidden) load();
+  });
+
+  effect(() => {
+    const list = messages();
+    store.users();
+    store.channels();
+    if (list.length === 0) {
+      replace(body, [
+        el('div', {
+          class: 'empty',
+          text: 'Nothing saved yet. Save a message to keep it here.',
+        }),
+      ]);
+      return;
+    }
+    replace(
+      body,
+      list.map((m) => {
+        const channel = store.channels().get(m.ch);
+        return el(
+          'div',
+          { class: 'saved-item' },
+          el('button', {
+            class: 'saved-origin',
+            text: channel
+              ? `${channel.k === 'public' ? '#' : ''}${store.channelTitle(channel)}`
+              : 'a channel',
+            title: 'Go to channel',
+            on: { click: () => onOpenChannel(m.ch) },
+          }),
+          renderMessage(store, actions, m, false),
+        );
+      }),
+    );
+  });
+
+  (root as HTMLElement & { toggle?: () => void }).toggle = () => {
+    root.hidden = !root.hidden;
+    if (!root.hidden) load();
+  };
+  return root;
+}
+
 // -- Member list ---------------------------------------------------------
 
 export function MemberList(store: Store, onOpenDm: (user: Id) => void): HTMLElement {

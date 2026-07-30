@@ -108,6 +108,7 @@ export type ServerFrame =
   | { msg_del: { id: Id; ch: Id } }
   | { react: { id: Id; ch: Id; e: string; u: Id; on: boolean } }
   | { pin: { id: Id; ch: Id; by: Id; on: boolean } }
+  | { saved: { id: Id; on: boolean } }
   | { typing: { ch: Id; u: Id } }
   | { presence: { u: Id; p: Presence } }
   | { read: { rs: ReadState } }

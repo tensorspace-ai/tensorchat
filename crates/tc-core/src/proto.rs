@@ -168,6 +168,14 @@ pub enum ServerFrame {
         #[serde(rename = "on")]
         on: bool,
     },
+    /// A message was saved or unsaved. **Per-user, never broadcast** — a save
+    /// is private, so this goes only to its owner's other tabs, the same way
+    /// `Read` does.
+    Saved {
+        id: Id,
+        #[serde(rename = "on")]
+        on: bool,
+    },
     Typing {
         #[serde(rename = "ch")]
         channel: Id,

@@ -55,7 +55,9 @@ pub fn routes() -> Router<Shared> {
         )
         .route("/api/messages/{id}/reactions", post(react))
         .route("/api/messages/{id}/pin", post(set_pin))
+        .route("/api/messages/{id}/save", post(set_saved))
         .route("/api/channels/{id}/pins", get(channel_pins))
+        .route("/api/saved", get(saved))
         .route("/api/messages/{id}/read", post(mark_read))
         .route("/api/threads/{id}", get(thread))
         .route("/api/dm", post(open_dm))
@@ -179,19 +181,7 @@ fn is_secure(st: &Shared) -> bool {
 async fn logout(State(st): State<Shared>, headers: HeaderMap) -> ApiResult<StatusCode> {
     // Revoke by the presented token; a session is server-side state, so this
     // takes effect immediately for every client holding it.
-    let token = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer "))
-        .map(|s| s.trim().to_string())
-        .or_else(|| {
-            headers
-                .get(header::COOKIE)
-                .and_then(|v| v.to_str().ok())
-                .and_then(|c| crate::state::cookie_value(c, "tc_session"))
-        });
-
-    if let Some(t) = token {
+    if let Some(t) = crate::state::bearer_token(&headers) {
         let hash = auth::token_hash(&t);
         st.db(move |s| s.delete_session(&hash)).await?;
     }
@@ -587,6 +577,39 @@ async fn channel_pins(
 ) -> ApiResult<Json<Vec<Message>>> {
     let uid = u.id;
     Ok(Json(st.db(move |s| s.pinned_messages(id, uid)).await?))
+}
+
+/// Reuses [`PinReq`]'s shape — both are a single `on` toggle defaulting to
+/// true, so a bare POST means "turn it on".
+async fn set_saved(
+    State(st): State<Shared>,
+    Auth(u): Auth,
+    Path(id): Path<Id>,
+    Json(req): Json<PinReq>,
+) -> ApiResult<StatusCode> {
+    service::set_saved(&st, u.id, id, req.on).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+pub struct SavedQuery {
+    limit: Option<u32>,
+}
+
+/// Everything the caller has saved, newest first.
+///
+/// Scoped by membership in the query rather than filtered afterwards, so a
+/// channel you have left takes its messages with it.
+async fn saved(
+    State(st): State<Shared>,
+    Auth(u): Auth,
+    Query(q): Query<SavedQuery>,
+) -> ApiResult<Json<Vec<Message>>> {
+    let (uid, limit) = (
+        u.id,
+        q.limit.unwrap_or(50).clamp(1, tc_store::MAX_SAVED_PAGE),
+    );
+    Ok(Json(st.db(move |s| s.saved_messages(uid, limit)).await?))
 }
 
 #[derive(Deserialize)]

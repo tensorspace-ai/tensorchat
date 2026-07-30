@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Saved messages** — a private, cross-channel collection reachable from the
+  sidebar. `POST /api/messages/{id}/save`, `GET /api/saved`, and a per-user
+  `saved` frame so a save syncs across tabs.
 - **Pinned messages** — any member can pin a message to a channel; pins appear
   in a side pane, are marked in the main scroll, and are capped at 100 per
   channel. `POST /api/messages/{id}/pin`, `GET /api/channels/{id}/pins`, and a

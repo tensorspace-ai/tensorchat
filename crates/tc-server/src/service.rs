@@ -198,6 +198,29 @@ pub async fn set_pin(st: &Shared, user: Id, message: Id, on: bool) -> ApiResult<
     Ok(())
 }
 
+/// Save or unsave a message, and echo it to that user's other tabs.
+///
+/// Membership is checked here as well as in the read path: without it, anyone
+/// could save a message id out of a channel they cannot see and then discover,
+/// from whether it ever appears in their list, whether they were later added to
+/// that channel.
+pub async fn set_saved(st: &Shared, user: Id, message: Id, on: bool) -> ApiResult<()> {
+    let target = st.db(move |s| s.message(message)).await?;
+    if !st.db(move |s| s.is_member(target.channel_id, user)).await? {
+        return Err(ApiError::Forbidden);
+    }
+
+    if st
+        .db(move |s| s.set_saved(user, message, on, now_ms()))
+        .await?
+    {
+        // Per-user, not broadcast: nobody else has any business knowing.
+        st.hub
+            .send_to_user(user, &ServerFrame::Saved { id: message, on });
+    }
+    Ok(())
+}
+
 /// Advance a read cursor and echo the new state to that user's other tabs.
 pub async fn mark_read(st: &Shared, user: Id, channel: Id, up_to: Id) -> ApiResult<ReadState> {
     let state = st.db(move |s| s.mark_read(channel, user, up_to)).await?;

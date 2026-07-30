@@ -35,16 +35,18 @@ use tc_core::Id;
 mod channels;
 mod messages;
 mod pins;
+mod saved;
 mod search;
 mod users;
 
 pub use channels::NewChannel;
 pub use messages::{HistoryPage, NewMessage};
 pub use pins::MAX_PINS_PER_CHANNEL;
+pub use saved::MAX_SAVED_PAGE;
 pub use search::SearchQuery;
 
 /// Schema version embedded in the database via `PRAGMA user_version`.
-const SCHEMA_VERSION: i32 = 2;
+const SCHEMA_VERSION: i32 = 3;
 
 /// Incremental upgrades, each paired with the version it produces.
 ///
@@ -64,6 +66,7 @@ const SCHEMA_VERSION: i32 = 2;
 const MIGRATIONS: &[(i32, &str)] = &[
     (1, include_str!("migrations/001_initial.sql")),
     (2, include_str!("migrations/002_pins.sql")),
+    (3, include_str!("migrations/003_saved.sql")),
 ];
 
 pub type Result<T> = std::result::Result<T, Error>;

@@ -14,7 +14,7 @@ import type { Channel, Id } from './protocol.ts';
 import { Composer } from './ui/composer.ts';
 import { LoginScreen } from './ui/login.ts';
 import { MessageList, type MessageActions } from './ui/messages.ts';
-import { MemberList, PinnedPane, SearchOverlay, ThreadPane } from './ui/panels.ts';
+import { MemberList, PinnedPane, SavedPane, SearchOverlay, ThreadPane } from './ui/panels.ts';
 import { Sidebar } from './ui/sidebar.ts';
 import {
   browseChannelsDialog,
@@ -160,6 +160,12 @@ function start(root: HTMLElement): void {
       store.setPinned(channel, id, on);
       void api.setPin(id, on).catch(() => store.setPinned(channel, id, !on));
     },
+    setSaved: (id, on) => {
+      // Optimistic, then reconciled by the server's `saved` echo — which also
+      // reaches this user's other tabs.
+      store.setSavedLocal(id, on);
+      void api.setSaved(id, on).catch(() => store.setSavedLocal(id, !on));
+    },
     openThread: (rootId) => store.openThread.set(rootId),
     edit: (id, body) => {
       const next = prompt('Edit message', body);
@@ -181,6 +187,7 @@ function start(root: HTMLElement): void {
     createChannel: () => createChannelDialog(adoptChannel),
     browseChannels: () => browseChannelsDialog(store, adoptChannel),
     newDm: () => newDmDialog(store, adoptChannel),
+    openSaved: () => (savedPane as HTMLElement & { toggle?: () => void }).toggle?.(),
     openPreferences: () =>
       preferencesDialog(
         store,
@@ -246,6 +253,7 @@ function start(root: HTMLElement): void {
 
   const memberPane = MemberList(store, (user) => void openDmWith(user));
   const pinnedPane = PinnedPane(store, messageActions);
+  const savedPane = SavedPane(store, messageActions, openChannel);
   const search = SearchOverlay(store, (channel) => openChannel(channel));
 
   const channelHeader = ChannelHeader(store, {
@@ -270,6 +278,7 @@ function start(root: HTMLElement): void {
         composer,
       ),
       pinnedPane,
+      savedPane,
       memberPane,
       threadPane,
       search,
@@ -277,6 +286,14 @@ function start(root: HTMLElement): void {
   ]);
 
   // -- Cross-cutting behaviors -------------------------------------------
+
+  // The saved set is not part of the connect snapshot — it is personal state
+  // nothing else depends on — so fetch it once to mark saved messages in
+  // history. The panel refetches on open.
+  void api
+    .saved()
+    .then((list) => store.setSaved(list.map((m) => m.id)))
+    .catch(() => {});
 
   // Open the first channel once the workspace snapshot arrives.
   effect(() => {

@@ -85,6 +85,15 @@ export class Store {
   pins = signal<Map<Id, Set<Id>>>(new Map());
 
   /**
+   * Message ids the viewer has saved.
+   *
+   * Flat rather than keyed by channel, because a saved list is a personal
+   * cross-channel collection — the one view in the product that deliberately
+   * ignores which channel a message came from.
+   */
+  savedIds = signal<Set<Id>>(new Set());
+
+  /**
    * The most recent membership delta, so open views of a channel's roster
    * update when someone is added or removed rather than going stale until the
    * pane is reopened. Null until the first one arrives.
@@ -175,6 +184,26 @@ export class Store {
       if (on) next.add(message);
       else next.delete(message);
       return new Map(prev).set(channel, next);
+    });
+  }
+
+  isSaved(message: Id): boolean {
+    return this.savedIds().has(message);
+  }
+
+  /** Replace the saved set wholesale, from a fetch. */
+  setSaved(ids: Id[]): void {
+    this.savedIds.set(new Set(ids));
+  }
+
+  /** Fold one save delta in, from a `saved` frame or an optimistic toggle. */
+  setSavedLocal(message: Id, on: boolean): void {
+    this.savedIds.update((prev) => {
+      if (on ? prev.has(message) : !prev.has(message)) return prev;
+      const next = new Set(prev);
+      if (on) next.add(message);
+      else next.delete(message);
+      return next;
     });
   }
 
@@ -348,6 +377,11 @@ export class Store {
     if ('pin' in frame) {
       const p = frame.pin;
       this.setPinned(p.ch, p.id, p.on);
+      return;
+    }
+
+    if ('saved' in frame) {
+      this.setSavedLocal(frame.saved.id, frame.saved.on);
       return;
     }
 

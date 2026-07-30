@@ -1530,6 +1530,36 @@ mark {
   padding: 8px 0 16px;
 }
 
+/* Saved messages come from everywhere, so each carries the channel it came
+   from — without it the list reads as context-free sentences. */
+.saved-item {
+  padding-top: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.saved-item:last-child {
+  border-bottom: 0;
+}
+
+.saved-origin {
+  display: block;
+  width: 100%;
+  padding: 0 var(--row-pad-x) 2px;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 650;
+  text-align: left;
+}
+
+.saved-origin:hover {
+  color: var(--accent);
+}
+
+/* A sidebar entry that opens a panel rather than a channel. */
+.shortcut-row {
+  margin-bottom: 4px;
+}
+
 .pane-header {
   display: flex;
   align-items: center;

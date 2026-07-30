@@ -38,6 +38,7 @@ type Row =
 export type MessageActions = {
   react: (message: Id, emoji: string, on: boolean) => void;
   setPin: (message: Id, on: boolean) => void;
+  setSaved: (message: Id, on: boolean) => void;
   openThread: (root: Id) => void;
   edit: (message: Id, body: string) => void;
   remove: (message: Id) => void;
@@ -92,9 +93,11 @@ export function MessageList(store: Store, actions: MessageActions): HTMLElement 
     log.version();
     store.users();
     store.pending();
-    // Pins live outside the message log, so the log's version counter does not
-    // cover them; subscribe separately or a pin never repaints its message.
+    // Pins and saves live outside the message log, so the log's version counter
+    // does not cover them; subscribe separately or a pin never repaints its
+    // message.
     store.pins();
+    store.savedIds();
 
     const rows = buildRows(store, channel, log.messages);
     const wasPinned = list.isPinnedToBottom();
@@ -365,6 +368,21 @@ function hoverActions(store: Store, actions: MessageActions, m: Message): HTMLEl
         on: { click: () => actions.setPin(m.id, !pinned) },
       },
       icon(ICONS.pin, 14),
+    ),
+  );
+
+  // Saving is private, so it sits next to pinning but says nothing to anyone
+  // else in the channel.
+  const saved = store.isSaved(m.id);
+  bar.appendChild(
+    el(
+      'button',
+      {
+        class: `action${saved ? ' active' : ''}`,
+        title: saved ? 'Remove from saved' : 'Save for later',
+        on: { click: () => actions.setSaved(m.id, !saved) },
+      },
+      icon(ICONS.bookmark, 14),
     ),
   );
 
