@@ -8,7 +8,7 @@
 -- two paths agree.
 --
 -- Conventions:
---   * Every `id` is a Snowflake (see tc-core::id). Because they are monotonic,
+--   * Every `id` is a Snowflake (see tensorchat-core::id). Because they are monotonic,
 --     `INTEGER PRIMARY KEY` gives us insertion at the right edge of the B-tree
 --     (no page splits), free chronological ordering, and a pagination cursor —
 --     without a single secondary index on a timestamp column.
@@ -46,7 +46,7 @@ CREATE INDEX sessions_by_user ON sessions (user_id);
 
 CREATE TABLE channels (
     id           INTEGER PRIMARY KEY,
-    -- 0 public, 1 private, 2 dm, 3 group. Mirrors tc_core::ChannelKind.
+    -- 0 public, 1 private, 2 dm, 3 group. Mirrors tensorchat_core::ChannelKind.
     kind         INTEGER NOT NULL,
     name         TEXT    NOT NULL DEFAULT '',
     topic        TEXT    NOT NULL DEFAULT '',

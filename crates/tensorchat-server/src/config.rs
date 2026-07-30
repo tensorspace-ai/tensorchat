@@ -38,7 +38,7 @@ pub struct Config {
     pub auth_per_second: f32,
     /// How people actually reach this server, e.g. `https://chat.example.com`.
     /// The server never needs it — it sits behind whatever proxy the operator
-    /// put there — but `tc-server invite` has to print a link somebody can
+    /// put there — but `tensorchat invite` has to print a link somebody can
     /// click, and the bind address is usually not it.
     pub public_url: Option<String>,
     /// Contact address embedded in every VAPID token, as a `mailto:` or URL.

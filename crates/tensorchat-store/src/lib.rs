@@ -1,4 +1,4 @@
-//! `tc-store` — persistence on SQLite.
+//! `tensorchat-store` — persistence on SQLite.
 //!
 //! # Why SQLite
 //!
@@ -14,7 +14,7 @@
 //! # Blocking
 //!
 //! Every method here is synchronous and may block. Callers on an async runtime
-//! must wrap them in `spawn_blocking` (tc-server does this in one place, see
+//! must wrap them in `spawn_blocking` (tensorchat-server does this in one place, see
 //! `db::Db`). Queries are single-digit microseconds, so the handoff cost
 //! dominates — but blocking a reactor thread on a page fault is still not
 //! something to leave to chance.

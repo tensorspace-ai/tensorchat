@@ -1,5 +1,5 @@
 /**
- * The wire protocol, mirrored from `crates/tc-core/src/proto.rs`.
+ * The wire protocol, mirrored from `crates/tensorchat-core/src/proto.rs`.
  *
  * Field names are the short forms the Rust side serializes (`ch`, `au`, `b`).
  * They are terse because every key is repeated on every frame; the types here

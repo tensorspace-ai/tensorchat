@@ -1,4 +1,4 @@
-//! `tc-core` — the vocabulary of TensorChat.
+//! `tensorchat-core` — the vocabulary of TensorChat.
 //!
 //! Domain types, the WebSocket wire protocol, ID generation, and the text
 //! rules that bound user input. It has no I/O and no async runtime, so both

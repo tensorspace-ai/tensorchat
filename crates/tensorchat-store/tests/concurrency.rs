@@ -11,7 +11,7 @@
 //! reads first and then tries to upgrade to a write. Such a transaction already
 //! holds a read snapshot that a competing writer may have invalidated, so
 //! SQLite has no choice but to fail it immediately with `SQLITE_BUSY` — waiting
-//! could deadlock. Every write path in `tc-store` therefore opens its
+//! could deadlock. Every write path in `tensorchat-store` therefore opens its
 //! transaction as `IMMEDIATE`, which takes the write lock up front so
 //! contending writers queue on the timeout instead of erroring.
 //!
