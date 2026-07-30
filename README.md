@@ -53,11 +53,18 @@ bearer credential on the whole HTTP API, and `POST /api/hooks/{token}` accepts
 can only reach the channels it has been added to, so a leaked hook URL is
 contained by membership like anything else.
 
+**Notifications** — mentions and direct messages raise a notification, whether
+or not a tab is open. Web Push wakes a service worker, which then fetches the
+content from your own server, so message bodies never pass through Google's or
+Mozilla's push infrastructure. Opt-in, and muted channels stay quiet.
+
+**Installable** — a progressive web app: install it from the browser, launch it
+standalone, and open it offline to a cached shell rather than a dinosaur.
+
 **Client** — virtual-scrolled history that stays smooth over a hundred thousand
 messages, optimistic sending, per-channel drafts that survive a reload, inline
-message editing, mention autocomplete, drag-drop and paste-to-upload, opt-in
-desktop notifications, a System/Light/Dark theme toggle, and keyboard
-navigation.
+message editing, mention autocomplete, drag-drop and paste-to-upload, a
+System/Light/Dark theme toggle, and keyboard navigation.
 
 ---
 
@@ -144,6 +151,7 @@ All configuration is environment variables. Everything has a working default.
 | `TC_OPEN_REGISTRATION` | `true` | Set `false` to close signups. Invite links still work — see below. |
 | `TC_AUTH_BURST` | `10` | Login/register attempts allowed per client address before throttling. |
 | `TC_AUTH_PER_SECOND` | `0.5` | Refill rate for that allowance. Raise both behind a proxy that hides client addresses. |
+| `TC_PUSH_CONTACT` | `mailto:admin@localhost` | Contact address in VAPID tokens. Set to an empty string to disable Web Push. |
 | `TC_PERMISSIVE_CORS` | `false` | Development only. |
 | `RUST_LOG` | `tc_server=info` | Log filter. |
 
@@ -164,6 +172,19 @@ TC_OPEN_REGISTRATION=false cargo run --release -p tc-server
 An invite grants nothing but the right to create an account; the account it
 makes is an ordinary member. Links are stored as a SHA-256 digest and shown
 exactly once, so a lost link is reissued rather than recovered.
+
+### Notifications
+
+Web Push needs a **secure context**, which in practice means serving over HTTPS
+(`localhost` is exempt, so development works unconfigured). Put the usual
+reverse proxy in front and notifications start working with no further setup:
+the VAPID keypair is generated into the database on first run and reused
+afterwards.
+
+Set `TC_PUSH_CONTACT` to a real address you are willing to be contacted at —
+push services use it to report abuse from your server. Setting it to an empty
+string turns the feature off, and clients then fall back to notifications that
+only appear while a tab is open.
 
 ### Development
 

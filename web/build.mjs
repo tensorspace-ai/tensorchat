@@ -98,6 +98,31 @@ async function build() {
     /* optional directory */
   });
 
+  // The service worker, last: it needs the hashed asset names to precache, and
+  // it lands at the site root because a worker's scope cannot be broader than
+  // its own URL. Its filename is deliberately *not* hashed — the browser looks
+  // for it at a fixed path — so the cache name carries the build identity
+  // instead, and changing it is what retires the previous deployment's cache.
+  const precache = ['/', '/index.html', `/assets/${jsName}`, `/assets/${bootName}`, `/assets/${cssName}`];
+  const swResult = await esbuild.build({
+    entryPoints: [join(here, 'src/sw.ts')],
+    bundle: true,
+    format: 'iife',
+    target: ['es2022', 'chrome111', 'firefox113', 'safari16'],
+    minify: !dev,
+    resolveExtensions: ['.ts', '.js'],
+    write: false,
+    outdir: outDir,
+    legalComments: 'none',
+    define: {
+      __CACHE_NAME__: JSON.stringify(`tc-${hash(Buffer.from(precache.join('|')))}`),
+      __PRECACHE__: JSON.stringify(precache),
+    },
+  });
+  const swFile = swResult.outputFiles.find((f) => f.path.endsWith('.js'));
+  if (!swFile) throw new Error('esbuild produced no service worker output');
+  await writeFile(join(outDir, 'sw.js'), swFile.contents);
+
   const jsKb = (jsFile.contents.byteLength / 1024).toFixed(1);
   const cssKb = (Buffer.byteLength(css.code) / 1024).toFixed(1);
   console.log(`built  js ${jsKb} kB  css ${cssKb} kB  ->  ${assetDir}`);

@@ -31,7 +31,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store = tc_store::Store::open(&cfg.db_path)?;
     tracing::info!(db = %cfg.db_path.display(), "database ready");
 
-    let st: Shared = Arc::new(AppState::new(cfg.clone(), store));
+    // Web Push needs a stable VAPID keypair, minted into the database on first
+    // run. A failure here disables push rather than stopping the server: chat
+    // works without notifications, and refusing to boot over them would be a
+    // poor trade.
+    let vapid = if cfg.push_contact.is_empty() {
+        tracing::info!("web push disabled (TC_PUSH_CONTACT is empty)");
+        None
+    } else {
+        match tc_server::push::Vapid::load(&store, &cfg.push_contact) {
+            Ok(v) => {
+                tracing::info!("web push enabled");
+                Some(v)
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "web push disabled");
+                None
+            }
+        }
+    };
+
+    let st: Shared = Arc::new(AppState::new(cfg.clone(), store).with_push(vapid));
     spawn_maintenance(st.clone());
 
     let app = build_router(st.clone());

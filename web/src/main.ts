@@ -17,6 +17,18 @@ if (!root) {
   throw new Error('#root is missing from the document');
 }
 
+// The service worker backs the offline shell and receives push notifications.
+// Registered after mount is scheduled, and failures are swallowed: it is an
+// enhancement, and an unsupported browser or an insecure origin must not stop
+// the app from starting.
+if ('serviceWorker' in navigator) {
+  addEventListener('load', () => {
+    void navigator.serviceWorker.register('/sw.js').catch((err: unknown) => {
+      console.warn('service worker registration failed', err);
+    });
+  });
+}
+
 try {
   mount(root);
 } catch (err) {

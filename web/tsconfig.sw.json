@@ -1,0 +1,26 @@
+{
+  "// note": "Type checking for the service worker only. It runs in a ServiceWorkerGlobalScope, which conflicts with the DOM lib the app is checked against \u2014 chiefly over `self` \u2014 so it needs its own `lib` and its own pass.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": [
+      "ES2022",
+      "WebWorker"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strict": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": [
+    "src/sw.ts"
+  ]
+}

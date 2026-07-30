@@ -10,6 +10,7 @@
 import { el, replace } from '../dom.ts';
 import { ApiError, api } from '../api.ts';
 import { readPreference, setPreference, type ThemePreference } from '../theme.ts';
+import { pushSupported, subscribe, unsubscribe } from '../push.ts';
 import type { Channel, Id, Invite, User } from '../protocol.ts';
 import type { Notifier } from '../notify.ts';
 import type { Store } from '../store.ts';
@@ -816,7 +817,7 @@ export function preferencesDialog(
     const asked = notifyToggle.checked;
     // Permission can only be requested from a user gesture, which is exactly
     // what this handler is — so the prompt appears rather than being ignored.
-    void notifier.setEnabled(asked).then((on) => {
+    void notifier.setEnabled(asked).then(async (on) => {
       // The checkbox follows what actually happened, not what was clicked: a
       // browser that blocks notifications must not leave it looking enabled.
       notifyToggle.checked = on;
@@ -824,8 +825,22 @@ export function preferencesDialog(
         notifyNote.textContent =
           'Your browser is blocking notifications for this site. Allow them in its site settings to turn this on.';
         notifyNote.hidden = false;
+        return;
+      }
+
+      // One decision, two mechanisms: the in-page notifier covers an open tab,
+      // and a push subscription covers the case that matters more — nothing
+      // open at all. Asking twice would be asking the same question twice.
+      notifyNote.hidden = true;
+      if (on) {
+        const pushed = await subscribe();
+        if (!pushed && pushSupported()) {
+          notifyNote.textContent =
+            'Notifications will show while TensorChat is open. Background notifications are unavailable — the server may have push disabled, or this page is not on HTTPS.';
+          notifyNote.hidden = false;
+        }
       } else {
-        notifyNote.hidden = true;
+        await unsubscribe();
       }
     });
   });
@@ -911,6 +926,14 @@ export function preferencesDialog(
           class: 'modal-hint',
           text: 'This browser does not support desktop notifications.',
         }),
+    notifier.supported
+      ? el('p', {
+          class: 'modal-hint',
+          text: pushSupported()
+            ? 'Works when TensorChat is closed, too.'
+            : 'Only while TensorChat is open — this browser cannot receive background notifications.',
+        })
+      : null,
     notifyNote,
 
     el('hr', { class: 'modal-divider' }),

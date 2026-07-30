@@ -2657,3 +2657,299 @@ async fn operators_compose() {
     assert_eq!(hits.len(), 1, "got {hits:?}");
     assert!(hits[0].contains("runbook"));
 }
+
+// ---------------------------------------------------------------- web push
+
+#[tokio::test]
+async fn the_vapid_public_key_is_offered_to_signed_in_clients() {
+    // The public half is not a secret — handing it to every client is its whole
+    // job, since it is what lets the browser verify a later push came from us.
+    let app = App::new();
+    let (alice, _) = app.account("alice").await;
+
+    let (status, body) = app.send("GET", "/api/push/key", Some(&alice), None).await;
+    assert_eq!(status, StatusCode::OK);
+    // The test harness builds `AppState` without a VAPID identity, so this is
+    // the "push is switched off" shape the client reads as "hide the toggle".
+    assert!(body["key"].is_null());
+
+    // But it still requires a session: an anonymous caller learns nothing.
+    let (status, _) = app.send("GET", "/api/push/key", None, None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn a_browser_can_subscribe_and_unsubscribe() {
+    let app = App::new();
+    let (alice, _) = app.account("alice").await;
+    let endpoint = json!({ "endpoint": "https://fcm.googleapis.com/fcm/send/abc123" });
+
+    let (status, _) = app
+        .send(
+            "POST",
+            "/api/push/subscribe",
+            Some(&alice),
+            Some(endpoint.clone()),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    // Subscribing twice is how a returning tab re-confirms; it must not error.
+    let (status, _) = app
+        .send(
+            "POST",
+            "/api/push/subscribe",
+            Some(&alice),
+            Some(endpoint.clone()),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (status, _) = app
+        .send(
+            "DELETE",
+            "/api/push/subscribe",
+            Some(&alice),
+            Some(endpoint),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn a_push_endpoint_must_be_a_bounded_https_url() {
+    // This is a URL the server will later POST to, so it is not merely opaque
+    // storage: an http: or absurdly long value is refused rather than kept.
+    let app = App::new();
+    let (alice, _) = app.account("alice").await;
+
+    for bad in [
+        json!({ "endpoint": "http://insecure.example/push" }),
+        json!({ "endpoint": "javascript:alert(1)" }),
+        json!({ "endpoint": "" }),
+        json!({ "endpoint": format!("https://example.com/{}", "x".repeat(4096)) }),
+    ] {
+        let (status, _) = app
+            .send(
+                "POST",
+                "/api/push/subscribe",
+                Some(&alice),
+                Some(bad.clone()),
+            )
+            .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{bad}");
+    }
+}
+
+#[tokio::test]
+async fn subscriptions_require_a_session_and_are_scoped_to_their_owner() {
+    let app = App::new();
+    let (alice, _) = app.account("alice").await;
+    let (bob, _) = app.account("bob").await;
+    let endpoint = json!({ "endpoint": "https://fcm.googleapis.com/fcm/send/alices-phone" });
+
+    let (status, _) = app
+        .send("POST", "/api/push/subscribe", None, Some(endpoint.clone()))
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    app.send(
+        "POST",
+        "/api/push/subscribe",
+        Some(&alice),
+        Some(endpoint.clone()),
+    )
+    .await;
+
+    // Bob deleting alice's endpoint is a no-op rather than an unsubscribe: an
+    // endpoint is unguessable, but "delete by a client-supplied string" should
+    // not be a way to silence somebody else's phone.
+    let (status, _) = app
+        .send(
+            "DELETE",
+            "/api/push/subscribe",
+            Some(&bob),
+            Some(endpoint.clone()),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    // Alice's subscription survived, which she can tell because unsubscribing
+    // it herself still works.
+    let (status, _) = app
+        .send(
+            "DELETE",
+            "/api/push/subscribe",
+            Some(&alice),
+            Some(endpoint),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn notifications_describe_mentions_and_direct_messages() {
+    // This endpoint is what makes a payload-less push work: the service worker
+    // fetches the content from here rather than receiving it from Google.
+    let app = App::new();
+    let (alice, alice_id) = app.account("alice").await;
+    let (bob, _) = app.account("bob").await;
+
+    let (_, chan) = app
+        .send(
+            "POST",
+            "/api/channels",
+            Some(&bob),
+            Some(json!({ "name": "general", "private": false, "members": [alice_id] })),
+        )
+        .await;
+    let ch = chan["id"].as_str().unwrap();
+
+    // Ordinary channel traffic is not worth waking anyone for.
+    app.send(
+        "POST",
+        &format!("/api/channels/{ch}/messages"),
+        Some(&bob),
+        Some(json!({ "body": "morning all" })),
+    )
+    .await;
+    let (status, items) = app
+        .send("GET", "/api/me/notifications", Some(&alice), None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        items.as_array().unwrap().is_empty(),
+        "a channel message that mentions nobody must not buzz a phone: {items}"
+    );
+
+    // A mention is.
+    app.send(
+        "POST",
+        &format!("/api/channels/{ch}/messages"),
+        Some(&bob),
+        Some(json!({ "body": "@alice could you look?" })),
+    )
+    .await;
+    let (_, items) = app
+        .send("GET", "/api/me/notifications", Some(&alice), None)
+        .await;
+    let items = items.as_array().unwrap();
+    assert_eq!(items.len(), 1, "{items:?}");
+    assert_eq!(items[0]["title"], "bob in #general");
+    assert!(
+        items[0]["body"]
+            .as_str()
+            .unwrap()
+            .contains("could you look")
+    );
+    assert_eq!(items[0]["ch"].as_str().unwrap(), ch);
+
+    // And so is a direct message, with the author as the title.
+    let (_, dm) = app
+        .send(
+            "POST",
+            "/api/dm",
+            Some(&bob),
+            Some(json!({ "users": [alice_id] })),
+        )
+        .await;
+    let dm_id = dm["id"].as_str().unwrap();
+    app.send(
+        "POST",
+        &format!("/api/channels/{dm_id}/messages"),
+        Some(&bob),
+        Some(json!({ "body": "are you around?" })),
+    )
+    .await;
+    let (_, items) = app
+        .send("GET", "/api/me/notifications", Some(&alice), None)
+        .await;
+    let items = items.as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0]["title"], "bob", "a DM is titled by its author");
+}
+
+#[tokio::test]
+async fn notifications_are_private_to_the_caller() {
+    let app = App::new();
+    let (alice, alice_id) = app.account("alice").await;
+    let (bob, _) = app.account("bob").await;
+    let (carol, _) = app.account("carol").await;
+
+    let (_, dm) = app
+        .send(
+            "POST",
+            "/api/dm",
+            Some(&bob),
+            Some(json!({ "users": [alice_id] })),
+        )
+        .await;
+    let dm_id = dm["id"].as_str().unwrap();
+    app.send(
+        "POST",
+        &format!("/api/channels/{dm_id}/messages"),
+        Some(&bob),
+        Some(json!({ "body": "just between us" })),
+    )
+    .await;
+
+    let (_, mine) = app
+        .send("GET", "/api/me/notifications", Some(&alice), None)
+        .await;
+    assert_eq!(mine.as_array().unwrap().len(), 1);
+
+    // Carol is in no conversation with either of them.
+    let (_, theirs) = app
+        .send("GET", "/api/me/notifications", Some(&carol), None)
+        .await;
+    assert!(theirs.as_array().unwrap().is_empty());
+
+    let (status, _) = app.send("GET", "/api/me/notifications", None, None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn reading_a_channel_clears_its_notifications() {
+    let app = App::new();
+    let (alice, alice_id) = app.account("alice").await;
+    let (bob, _) = app.account("bob").await;
+
+    let (_, dm) = app
+        .send(
+            "POST",
+            "/api/dm",
+            Some(&bob),
+            Some(json!({ "users": [alice_id] })),
+        )
+        .await;
+    let dm_id = dm["id"].as_str().unwrap();
+    let (_, msg) = app
+        .send(
+            "POST",
+            &format!("/api/channels/{dm_id}/messages"),
+            Some(&bob),
+            Some(json!({ "body": "are you around?" })),
+        )
+        .await;
+    let msg_id = msg["id"].as_str().unwrap();
+
+    let (_, items) = app
+        .send("GET", "/api/me/notifications", Some(&alice), None)
+        .await;
+    assert_eq!(items.as_array().unwrap().len(), 1);
+
+    app.send(
+        "POST",
+        &format!("/api/messages/{dm_id}/read"),
+        Some(&alice),
+        Some(json!({ "up_to": msg_id })),
+    )
+    .await;
+
+    let (_, items) = app
+        .send("GET", "/api/me/notifications", Some(&alice), None)
+        .await;
+    assert!(
+        items.as_array().unwrap().is_empty(),
+        "having read it, there is nothing left to be woken for"
+    );
+}

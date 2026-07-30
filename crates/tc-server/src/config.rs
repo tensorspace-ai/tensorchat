@@ -36,6 +36,10 @@ pub struct Config {
     pub auth_burst: f32,
     /// Sustained refill rate for the same limiter, in attempts per second.
     pub auth_per_second: f32,
+    /// Contact address embedded in every VAPID token, as a `mailto:` or URL.
+    /// Push services want somewhere to complain to; setting it to an empty
+    /// string switches Web Push off entirely.
+    pub push_contact: String,
 }
 
 impl Default for Config {
@@ -51,6 +55,10 @@ impl Default for Config {
             permissive_cors: false,
             auth_burst: 10.0,
             auth_per_second: 0.5,
+            // On by default with a placeholder contact: push is useless without
+            // it, and a self-hosted instance should not need configuration to
+            // get notifications working.
+            push_contact: "mailto:admin@localhost".to_string(),
         }
     }
 }
@@ -94,6 +102,13 @@ impl Config {
         }
         if let Ok(v) = std::env::var("TC_AUTH_PER_SECOND") {
             c.auth_per_second = v.parse().map_err(|e| format!("TC_AUTH_PER_SECOND: {e}"))?;
+        }
+        if let Ok(v) = std::env::var("TC_PUSH_CONTACT") {
+            let v = v.trim().to_string();
+            if !v.is_empty() && !v.starts_with("mailto:") && !v.starts_with("https://") {
+                return Err("TC_PUSH_CONTACT: expected a mailto: or https: address".into());
+            }
+            c.push_contact = v;
         }
         Ok(c)
     }

@@ -91,7 +91,43 @@ pub async fn post_message(
             message: message.clone(),
         },
     );
+
+    push_for(st, author.id, channel, &message.mentions).await;
     Ok(message)
+}
+
+/// Wake anyone this message is *for* who has nothing open.
+///
+/// The same rule the in-page notifier uses: a direct or group message reaches
+/// everyone in it, a channel message reaches only the people it mentions.
+/// Ordinary channel traffic must never buzz a phone, or the feature becomes one
+/// people switch off.
+///
+/// `push::notify` skips anyone with a live connection and does its network work
+/// on a spawned task, so this adds at most one membership lookup to the send
+/// path — and only for a DM.
+async fn push_for(st: &Shared, author: Id, channel: Id, mentions: &[Id]) {
+    let mut targets: Vec<Id> = mentions.to_vec();
+
+    // `@here`/`@channel` resolve to explicit mention ids already, so the only
+    // reason to widen is a DM, where every member is an intended recipient.
+    let kind = st.db(move |s| s.channel(channel)).await.map(|c| c.kind);
+    if matches!(
+        kind,
+        Ok(tc_core::ChannelKind::Dm | tc_core::ChannelKind::Group)
+    ) && let Ok(members) = st.db(move |s| s.members(channel)).await
+    {
+        targets.extend(members);
+    }
+
+    targets.sort_unstable();
+    targets.dedup();
+    for user in targets {
+        // Nobody needs waking for their own message.
+        if user != author {
+            crate::push::notify(st, user);
+        }
+    }
 }
 
 pub async fn edit_message(st: &Shared, author: Id, id: Id, body: &str) -> ApiResult<Message> {

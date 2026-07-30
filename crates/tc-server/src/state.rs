@@ -19,13 +19,37 @@ pub struct AppState {
     pub ids: IdGen,
     /// Guards the unauthenticated endpoints against credential stuffing.
     pub login_limiter: IpLimiter,
+    /// VAPID identity for Web Push. `None` when push is switched off, which is
+    /// what makes every push code path a no-op rather than a special case.
+    pub vapid: Option<crate::push::Vapid>,
+    /// Outbound client, for pushes. Held rather than built per request: it is
+    /// the connection pool, and the TLS session cache with it.
+    pub http: reqwest::Client,
     pub started: std::time::Instant,
 }
 
 pub type Shared = Arc<AppState>;
 
+/// Install the TLS backend, once, before the first outbound client is built.
+///
+/// `reqwest` is compiled with `rustls-no-provider`, which makes this choice
+/// explicit rather than implicit — and the choice is deliberate. The default,
+/// `aws-lc-rs`, needs CMake at build time; `ring` does not. This project already
+/// compiles C for the bundled SQLite, so `ring` adds no new class of build
+/// requirement, while CMake would be one more thing every cross-compiled release
+/// target has to provide.
+fn install_crypto_provider() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        // Errors only if a provider is already installed, which is not a
+        // problem — something has to win, and either one works.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
+
 impl AppState {
     pub fn new(cfg: Config, store: Store) -> AppState {
+        install_crypto_provider();
         let node = cfg.node_id;
         let (burst, rate) = (cfg.auth_burst, cfg.auth_per_second);
         AppState {
@@ -33,12 +57,30 @@ impl AppState {
             store,
             hub: Hub::new(),
             ids: IdGen::new(node),
+            vapid: None,
+            // A short timeout: a push service that has not answered in ten
+            // seconds is not going to, and the task is holding a subscription
+            // row's worth of retry state while it waits.
+            http: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(10))
+                .user_agent(concat!("tensorchat/", env!("CARGO_PKG_VERSION")))
+                .build()
+                .unwrap_or_default(),
             // Defaults to ten attempts refilling at one per two seconds:
             // generous for a person who mistyped, useless for a script. See
             // `Config::auth_burst` for when raising it is legitimate.
             login_limiter: IpLimiter::new(burst, rate),
             started: std::time::Instant::now(),
         }
+    }
+
+    /// Attach a VAPID identity, enabling Web Push.
+    ///
+    /// Separate from `new` because loading it touches the database, which the
+    /// constructor deliberately does not.
+    pub fn with_push(mut self, vapid: Option<crate::push::Vapid>) -> Self {
+        self.vapid = vapid;
+        self
     }
 
     #[inline]

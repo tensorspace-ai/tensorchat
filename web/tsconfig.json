@@ -19,5 +19,7 @@
     "verbatimModuleSyntax": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts"],
+  "// exclude": "The service worker runs in a worker global, not a window. DOM and WebWorker declare conflicting globals (`self`, `caches`, `fetch`), so it cannot be checked under the same `lib` as the app and gets tsconfig.sw.json instead.",
+  "exclude": ["src/sw.ts"]
 }

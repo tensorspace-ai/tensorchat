@@ -45,6 +45,12 @@ pub fn routes() -> Router<Shared> {
         .route("/api/admin/invites", get(list_invites).post(create_invite))
         .route("/api/admin/invites/{id}", delete(revoke_invite))
         .route("/api/invites/{token}", get(check_invite))
+        .route("/api/push/key", get(push_key))
+        .route(
+            "/api/push/subscribe",
+            post(push_subscribe).delete(push_unsubscribe),
+        )
+        .route("/api/me/notifications", get(my_notifications))
         .route("/api/hooks/{token}", post(incoming_hook))
         .route("/api/channels", get(my_channels).post(create_channel))
         .route("/api/channels/browse", get(browse_channels))
@@ -677,6 +683,124 @@ async fn check_invite(
     let now = now_ms();
     let valid = st.db(move |s| s.invite_is_live(&hash, now)).await?;
     Ok(Json(InviteCheckRes { valid }))
+}
+
+// ---------------------------------------------------------------- web push
+
+#[derive(Serialize)]
+pub struct PushKeyRes {
+    /// VAPID public key, base64url. `None` when push is switched off, which the
+    /// client reads as "do not offer the toggle".
+    key: Option<String>,
+}
+
+/// The application server key a browser needs to create a subscription.
+///
+/// Not a secret — it is the *public* half, and its whole job is to be handed to
+/// every client. It is what lets the browser verify that a later push really
+/// came from this server.
+async fn push_key(State(st): State<Shared>, Auth(_): Auth) -> Json<PushKeyRes> {
+    Json(PushKeyRes {
+        key: st.vapid.as_ref().map(|v| v.public_b64.clone()),
+    })
+}
+
+#[derive(Deserialize)]
+pub struct PushSubscribeReq {
+    endpoint: String,
+}
+
+/// Longest endpoint we will store. Real ones are ~200 bytes; this is a bound on
+/// what an authenticated client can write into the table, not a format check.
+const MAX_ENDPOINT_LEN: usize = 2048;
+
+/// Register this browser for push.
+///
+/// The endpoint is opaque and belongs to the push service, so there is nothing
+/// to validate beyond its shape — but it is a URL this server will later POST
+/// to, so it must at least be `https:` and bounded in length.
+async fn push_subscribe(
+    State(st): State<Shared>,
+    Auth(u): Auth,
+    Json(req): Json<PushSubscribeReq>,
+) -> ApiResult<StatusCode> {
+    let endpoint = req.endpoint.trim().to_string();
+    if endpoint.len() > MAX_ENDPOINT_LEN || !endpoint.starts_with("https://") {
+        return Err(ApiError::BadRequest("invalid push endpoint".into()));
+    }
+    let now = now_ms();
+    st.db(move |s| s.add_push_subscription(&endpoint, u.id, now))
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Forget this browser.
+///
+/// Scoped to the caller's own subscriptions: an endpoint is unguessable, but
+/// "delete by a string the client supplied" should not be a way to unsubscribe
+/// somebody else's device.
+async fn push_unsubscribe(
+    State(st): State<Shared>,
+    Auth(u): Auth,
+    Json(req): Json<PushSubscribeReq>,
+) -> ApiResult<StatusCode> {
+    let endpoint = req.endpoint.trim().to_string();
+    let mine = {
+        let e = endpoint.clone();
+        st.db(move |s| s.has_push_subscription(u.id, &e)).await?
+    };
+    if mine {
+        st.db(move |s| s.remove_push_subscription(&endpoint))
+            .await?;
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Serialize)]
+pub struct NotificationRes {
+    /// Channel id, for the permalink the notification opens.
+    ch: Id,
+    id: Id,
+    title: String,
+    body: String,
+}
+
+/// What the service worker renders after a push wakes it.
+///
+/// This is the reason a push can carry no payload: the content is fetched from
+/// here, on this origin, with the session cookie — so message bodies never pass
+/// through a third-party push service.
+async fn my_notifications(
+    State(st): State<Shared>,
+    Auth(u): Auth,
+) -> ApiResult<Json<Vec<NotificationRes>>> {
+    let uid = u.id;
+    let items = st
+        .db(move |s| s.pending_notifications(uid, tc_store::MAX_NOTIFICATIONS))
+        .await?;
+
+    // Titles are composed here rather than in the worker: the worker has no
+    // user directory, and shipping one to it would duplicate the store.
+    let mut out = Vec::with_capacity(items.len());
+    for item in items {
+        let author = st.db(move |s| s.user(item.author_id)).await?;
+        let who = if author.display_name.is_empty() {
+            author.handle.clone()
+        } else {
+            author.display_name.clone()
+        };
+        out.push(NotificationRes {
+            ch: item.channel_id,
+            id: item.message_id,
+            title: if item.is_dm {
+                who
+            } else {
+                format!("{who} in #{}", item.channel_name)
+            },
+            body: item.body,
+        });
+    }
+    Ok(Json(out))
 }
 
 #[derive(Deserialize)]

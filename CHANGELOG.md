@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Web Push and PWA** — mentions and direct messages now notify with no tab
+  open. The push itself carries **no payload**: the server sends an empty
+  VAPID-signed message and the service worker fetches the content from
+  `/api/me/notifications` on the same origin, so message bodies never pass
+  through a third-party push service. `POST /api/push/subscribe`,
+  `GET /api/push/key`, and a VAPID keypair generated into the database on first
+  run. Alongside it, the client is now an installable progressive web app: a
+  manifest with maskable icons, and a service worker that serves the app shell
+  offline — cache-first for content-hashed assets, network-first for everything
+  else so a deploy is never pinned by a stale `index.html`.
 - **Search operators** — `from:`, `in:`, `before:`, `after:` and `has:link` /
   `has:file` / `has:image`, parsed out of the query in `tc_core::query`. Date
   bounds become id bounds, since ids are time-sortable, so they need no

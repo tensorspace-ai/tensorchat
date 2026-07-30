@@ -1,4 +1,4 @@
--- TensorChat schema (version 7).
+-- TensorChat schema (version 8).
 --
 -- Conventions:
 --   * Every `id` is a Snowflake (see tc-core::id). Because they are monotonic,
@@ -212,6 +212,27 @@ CREATE TABLE attachments (
 ) STRICT;
 
 CREATE INDEX attachments_message ON attachments (message_id) WHERE message_id IS NOT NULL;
+
+-- Web Push subscriptions. Only the endpoint is kept: the `p256dh`/`auth` keys
+-- exist to encrypt a payload, and this server sends none — the push is an empty
+-- VAPID-signed poke and the service worker fetches the content from this origin.
+CREATE TABLE push_subscriptions (
+    endpoint   TEXT    PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    -- Consecutive soft failures; a 404/410 prunes the row outright.
+    failures   INTEGER NOT NULL DEFAULT 0
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX push_by_user ON push_subscriptions (user_id);
+
+-- Server-wide state that must survive a restart but is not domain data.
+-- Currently the VAPID keypair, which has to be stable because its public half
+-- is baked into every subscription a browser has already created.
+CREATE TABLE settings (
+    key   TEXT NOT NULL PRIMARY KEY,
+    value TEXT NOT NULL
+) STRICT, WITHOUT ROWID;
 
 -- Full-text search over message bodies.
 --

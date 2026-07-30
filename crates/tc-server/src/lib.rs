@@ -9,6 +9,7 @@ pub mod auth;
 pub mod config;
 pub mod error;
 pub mod hub;
+pub mod push;
 pub mod ratelimit;
 pub mod service;
 pub mod state;

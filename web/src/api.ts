@@ -145,6 +145,18 @@ export const api = {
 
   revokeBotToken: (tokenId: Id) => request<void>('DELETE', `/api/admin/tokens/${tokenId}`),
 
+  /**
+   * The VAPID public key a browser needs to create a push subscription. Null
+   * when the server has push switched off.
+   */
+  pushKey: () => request<{ key: string | null }>('GET', '/api/push/key'),
+
+  pushSubscribe: (endpoint: string) =>
+    request<void>('POST', '/api/push/subscribe', { endpoint }),
+
+  pushUnsubscribe: (endpoint: string) =>
+    request<void>('DELETE', '/api/push/subscribe', { endpoint }),
+
   invites: () => request<Invite[]>('GET', '/api/admin/invites'),
 
   /**
