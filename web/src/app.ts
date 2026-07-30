@@ -259,6 +259,13 @@ function start(root: HTMLElement): void {
   const channelHeader = ChannelHeader(store, {
     toggleMembers: () => (memberPane as HTMLElement & { toggle?: () => void }).toggle?.(),
     togglePinned: () => (pinnedPane as HTMLElement & { toggle?: () => void }).toggle?.(),
+    toggleMuted: () => {
+      const channel = store.currentChannel();
+      if (!channel) return;
+      // The server answers with the whole read state and also echoes it to this
+      // user's other tabs, so there is nothing to fold in by hand.
+      void api.muteChannel(channel, !store.isMuted(channel)).catch(() => {});
+    },
     openSearch: () => search.open(),
   });
 
@@ -354,14 +361,21 @@ function start(root: HTMLElement): void {
 
 function ChannelHeader(
   store: typeof import('./store.ts').store,
-  actions: { toggleMembers: () => void; togglePinned: () => void; openSearch: () => void },
+  actions: {
+    toggleMembers: () => void;
+    togglePinned: () => void;
+    toggleMuted: () => void;
+    openSearch: () => void;
+  },
 ): HTMLElement {
   const root = el('header', { class: 'channel-header' });
   effect(() => {
     const id = store.currentChannel();
     const c = id ? store.channels().get(id) : undefined;
     store.users();
+    store.readStates();
     const pinCount = id ? store.pinsIn(id).size : 0;
+    const muted = id ? store.isMuted(id) : false;
     replace(root, [
       el(
         'div',
@@ -396,6 +410,17 @@ function ChannelHeader(
               },
               icon(ICONS.pin, 17),
               el('span', { class: 'icon-count', text: String(pinCount) }),
+            )
+          : null,
+        c
+          ? el(
+              'button',
+              {
+                class: `icon-button${muted ? ' active' : ''}`,
+                title: muted ? 'Unmute this channel' : 'Mute this channel',
+                on: { click: actions.toggleMuted },
+              },
+              icon(muted ? ICONS.bellOff : ICONS.bell, 17),
             )
           : null,
         el(

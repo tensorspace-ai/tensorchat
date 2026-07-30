@@ -46,7 +46,7 @@ pub use saved::MAX_SAVED_PAGE;
 pub use search::SearchQuery;
 
 /// Schema version embedded in the database via `PRAGMA user_version`.
-const SCHEMA_VERSION: i32 = 3;
+const SCHEMA_VERSION: i32 = 4;
 
 /// Incremental upgrades, each paired with the version it produces.
 ///
@@ -67,6 +67,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (1, include_str!("migrations/001_initial.sql")),
     (2, include_str!("migrations/002_pins.sql")),
     (3, include_str!("migrations/003_saved.sql")),
+    (4, include_str!("migrations/004_mute.sql")),
 ];
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -277,18 +278,69 @@ mod tests {
         store.migrate().unwrap();
     }
 
-    /// Every object in a database, as SQLite itself describes it.
-    fn schema_of(conn: &Connection) -> Vec<(String, String, String)> {
-        let mut stmt = conn
+    /// A database's schema, described structurally rather than as source text.
+    ///
+    /// `sqlite_master.sql` is the *original* CREATE statement, comments and all,
+    /// and `ALTER TABLE ADD COLUMN` splices into that text rather than
+    /// regenerating it. Comparing it would make this test fail on a difference
+    /// in prose, and pass or fail unpredictably around any migration that uses
+    /// ALTER. So compare what SQLite actually enforces: the objects that exist,
+    /// each table's columns, and each table's indexes.
+    fn schema_of(conn: &Connection) -> Vec<String> {
+        let mut out = Vec::new();
+
+        let mut objects = conn
             .prepare(
                 "SELECT type, name, coalesce(sql, '') FROM sqlite_master \
                  WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name",
             )
             .unwrap();
-        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        let rows: Vec<(String, String, String)> = objects
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
             .unwrap()
             .collect::<rusqlite::Result<_>>()
-            .unwrap()
+            .unwrap();
+        drop(objects);
+
+        for (kind, name, sql) in rows {
+            match kind.as_str() {
+                "table" => {
+                    out.push(format!("table {name}"));
+                    let mut cols = conn.prepare(&format!("PRAGMA table_info({name})")).unwrap();
+                    let mut described: Vec<String> = cols
+                        .query_map([], |r| {
+                            Ok(format!(
+                                "  col {} {} notnull={} default={:?} pk={}",
+                                r.get::<_, String>(1)?,
+                                r.get::<_, String>(2)?,
+                                r.get::<_, i64>(3)?,
+                                r.get::<_, Option<String>>(4)?,
+                                r.get::<_, i64>(5)?,
+                            ))
+                        })
+                        .unwrap()
+                        .collect::<rusqlite::Result<_>>()
+                        .unwrap();
+                    // Column *order* is part of the schema for `SELECT *`, but
+                    // nothing here selects star, and ALTER can only append. Sort
+                    // so that "same columns, added at a different point in the
+                    // list" is not reported as a difference.
+                    described.sort();
+                    out.extend(described);
+                }
+                // Indexes, triggers and views are never rewritten in place, so
+                // their text is a fair comparison — and for a trigger the text
+                // *is* the behavior.
+                _ => out.push(format!("{kind} {name} {}", normalize_sql(&sql))),
+            }
+        }
+        out
+    }
+
+    /// Collapse whitespace so formatting differences between `schema.sql` and a
+    /// migration file are not mistaken for schema differences.
+    fn normalize_sql(sql: &str) -> String {
+        sql.split_whitespace().collect::<Vec<_>>().join(" ")
     }
 
     #[test]

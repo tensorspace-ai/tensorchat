@@ -167,6 +167,13 @@ pub struct ReadState {
     /// red badge, as opposed to the plain bold-unread state.
     #[serde(rename = "mn")]
     pub mentions: u32,
+    /// Muted: the client suppresses this channel's unread badge.
+    ///
+    /// The counts are still reported truthfully rather than zeroed. Muting is a
+    /// presentation choice, and a client that wants to show "12 unread, quietly"
+    /// should not have to ask the server a second time to find out.
+    #[serde(rename = "mu", default, skip_serializing_if = "is_false")]
+    pub muted: bool,
 }
 
 /// A search hit: the message plus enough context to render a result row

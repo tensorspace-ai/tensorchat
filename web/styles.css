@@ -1560,6 +1560,16 @@ mark {
   margin-bottom: 4px;
 }
 
+/* Muted: still legible, visibly quieter. A mention badge on a muted channel
+   keeps its full strength — that is the case muting is not meant to hide. */
+.channel-row.muted .channel-name {
+  opacity: 0.55;
+}
+
+.icon-button.active {
+  color: var(--accent);
+}
+
 .pane-header {
   display: flex;
   align-items: center;

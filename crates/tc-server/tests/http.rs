@@ -1181,6 +1181,92 @@ async fn a_deleted_message_leaves_the_pinned_list() {
 }
 
 #[tokio::test]
+async fn muting_is_per_user_and_keeps_the_counts_truthful() {
+    let app = App::new();
+    let (alice, _) = app.account("alice").await;
+    let (bob, bob_id) = app.account("bob").await;
+
+    let (_, channel) = app
+        .send(
+            "POST",
+            "/api/channels",
+            Some(&alice),
+            Some(json!({ "name": "noisy", "members": [bob_id] })),
+        )
+        .await;
+    let ch = channel["id"].as_str().unwrap();
+    app.send(
+        "POST",
+        &format!("/api/channels/{ch}/messages"),
+        Some(&alice),
+        Some(json!({ "body": "chatter" })),
+    )
+    .await;
+
+    let (status, state) = app
+        .send(
+            "POST",
+            &format!("/api/channels/{ch}/mute"),
+            Some(&bob),
+            Some(json!({ "on": true })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(state["mu"], true);
+    // Reported truthfully rather than zeroed: muting is a presentation choice,
+    // so the client can still show "1 unread, quietly".
+    assert_eq!(state["u"], 1);
+
+    // Alice's own view of the same channel is unaffected.
+    let (_, alice_state) = app
+        .send(
+            "POST",
+            &format!("/api/channels/{ch}/mute"),
+            Some(&alice),
+            Some(json!({ "on": false })),
+        )
+        .await;
+    assert!(!alice_state["mu"].as_bool().unwrap_or(false));
+
+    let (_, unmuted) = app
+        .send(
+            "POST",
+            &format!("/api/channels/{ch}/mute"),
+            Some(&bob),
+            Some(json!({ "on": false })),
+        )
+        .await;
+    assert!(!unmuted["mu"].as_bool().unwrap_or(false));
+}
+
+#[tokio::test]
+async fn a_non_member_cannot_mute_a_channel() {
+    let app = App::new();
+    let (alice, _) = app.account("alice").await;
+    let (bob, _) = app.account("bob").await;
+
+    let (_, channel) = app
+        .send(
+            "POST",
+            "/api/channels",
+            Some(&alice),
+            Some(json!({ "name": "general" })),
+        )
+        .await;
+    let ch = channel["id"].as_str().unwrap();
+
+    let (status, _) = app
+        .send(
+            "POST",
+            &format!("/api/channels/{ch}/mute"),
+            Some(&bob),
+            Some(json!({ "on": true })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn saved_messages_are_private_and_leave_with_the_channel() {
     let app = App::new();
     let (alice, _) = app.account("alice").await;

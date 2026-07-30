@@ -40,6 +40,7 @@ pub fn routes() -> Router<Shared> {
         .route("/api/channels/{id}", patch(update_channel))
         .route("/api/channels/{id}/join", post(join))
         .route("/api/channels/{id}/leave", post(leave))
+        .route("/api/channels/{id}/mute", post(set_muted))
         .route(
             "/api/channels/{id}/members",
             get(channel_members).post(add_members),
@@ -397,6 +398,16 @@ async fn leave(
 ) -> ApiResult<StatusCode> {
     service::leave_channel(&st, &u, id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Reuses [`PinReq`]'s single-`on` shape.
+async fn set_muted(
+    State(st): State<Shared>,
+    Auth(u): Auth,
+    Path(id): Path<Id>,
+    Json(req): Json<PinReq>,
+) -> ApiResult<Json<tc_core::ReadState>> {
+    Ok(Json(service::set_muted(&st, u.id, id, req.on).await?))
 }
 
 async fn channel_members(

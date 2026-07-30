@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Channel mute** — `POST /api/channels/{id}/mute`, with a toggle in the
+  channel header. A muted channel loses its unread emphasis but keeps its
+  mention badge, and the counts are still reported truthfully rather than
+  zeroed.
 - **Saved messages** — a private, cross-channel collection reachable from the
   sidebar. `POST /api/messages/{id}/save`, `GET /api/saved`, and a per-user
   `saved` frame so a save syncs across tabs.

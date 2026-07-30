@@ -1,4 +1,4 @@
--- TensorChat schema (version 3).
+-- TensorChat schema (version 4).
 --
 -- Conventions:
 --   * Every `id` is a Snowflake (see tc-core::id). Because they are monotonic,
@@ -69,6 +69,9 @@ CREATE TABLE members (
     -- membership, and co-locating it means "my channels + where I am in each"
     -- is one index scan instead of a join.
     last_read  INTEGER NOT NULL DEFAULT 0,
+    -- Muted: suppress this channel's unread badge. Also 1:1 with membership,
+    -- so it lives here for the same reason as the read cursor.
+    muted      INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (channel_id, user_id)
 ) STRICT, WITHOUT ROWID;
 

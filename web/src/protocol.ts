@@ -73,6 +73,7 @@ export type ReadState = {
   lr: Id; // last read
   u: number; // unread
   mn: number; // unread mentions
+  mu?: boolean; // muted — suppress the unread badge, but not mentions
 };
 
 export type SearchHit = { m: Message; sn: string };

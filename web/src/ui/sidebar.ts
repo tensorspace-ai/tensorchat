@@ -127,7 +127,10 @@ function channelRow(
   open: (id: Id) => void,
 ): HTMLElement {
   const unread = store.unread(c.id);
-  const hasUnread = (unread?.u ?? 0) > 0;
+  const muted = unread?.mu ?? false;
+  // Muting suppresses the plain unread emphasis but never a mention: someone
+  // typing your name is exactly the case you still wanted interrupting for.
+  const hasUnread = !muted && (unread?.u ?? 0) > 0;
   const mentions = unread?.mn ?? 0;
   const active = c.id === current;
 
@@ -136,6 +139,7 @@ function channelRow(
       'channel-row',
       active ? 'active' : '',
       hasUnread && !active ? 'unread' : '',
+      muted ? 'muted' : '',
     ]
       .filter(Boolean)
       .join(' '),

@@ -120,6 +120,10 @@ export const api = {
 
   leaveChannel: (id: Id) => request<void>('POST', `/api/channels/${id}/leave`),
 
+  /** Mute or unmute a channel. Resolves with the channel's new read state. */
+  muteChannel: (id: Id, on: boolean) =>
+    request<ReadState>('POST', `/api/channels/${id}/mute`, { on }),
+
   members: (id: Id) => request<Id[]>('GET', `/api/channels/${id}/members`),
 
   /**

@@ -221,6 +221,18 @@ pub async fn set_saved(st: &Shared, user: Id, message: Id, on: bool) -> ApiResul
     Ok(())
 }
 
+/// Mute or unmute a channel, and echo the new state to that user's other tabs.
+///
+/// Rides on the existing `Read` frame rather than introducing a mute-specific
+/// one: mute is a field of `ReadState`, so the frame that already carries read
+/// state carries this too, and clients need no new case to stay in sync.
+pub async fn set_muted(st: &Shared, user: Id, channel: Id, muted: bool) -> ApiResult<ReadState> {
+    let state = st.db(move |s| s.set_muted(channel, user, muted)).await?;
+    st.hub
+        .send_to_user(user, &ServerFrame::Read { read: state });
+    Ok(state)
+}
+
 /// Advance a read cursor and echo the new state to that user's other tabs.
 pub async fn mark_read(st: &Shared, user: Id, channel: Id, up_to: Id) -> ApiResult<ReadState> {
     let state = st.db(move |s| s.mark_read(channel, user, up_to)).await?;

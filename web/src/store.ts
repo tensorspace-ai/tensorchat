@@ -507,10 +507,22 @@ export class Store {
   }
 
   /** Total unread mentions, for the document title badge. */
+  /**
+   * Unread mentions across every channel, for the tab-title badge.
+   *
+   * Muting suppresses the plain unread badge but *not* mentions: someone typing
+   * your name is the case where you did want to be interrupted, and a mute that
+   * swallowed it would make muting too risky to use on a channel you still care
+   * about.
+   */
   totalMentions(): number {
     let n = 0;
     for (const s of this.readStates().values()) n += s.mn;
     return n;
+  }
+
+  isMuted(channel: Id): boolean {
+    return this.readStates().get(channel)?.mu ?? false;
   }
 
   /** Channels sorted for the sidebar: named channels first, then DMs. */

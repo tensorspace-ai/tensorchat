@@ -369,7 +369,8 @@ impl Store {
                         SELECT 1 FROM mentions mn
                          WHERE mn.user_id = m.user_id AND mn.channel_id = m.channel_id
                            AND mn.message_id > m.last_read
-                         LIMIT {cap}))
+                         LIMIT {cap})),
+                    m.muted
                FROM members m WHERE m.user_id = ?",
             cap = UNREAD_CAP + 1
         ))?;
@@ -380,9 +381,27 @@ impl Store {
                     last_read: from_sql(r.get(1)?),
                     unread: r.get::<_, i64>(2)? as u32,
                     mentions: r.get::<_, i64>(3)? as u32,
+                    muted: r.get(4)?,
                 })
             })?
             .collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Mute or unmute a channel for one user. Returns the resulting read state,
+    /// so the caller can echo one frame rather than making the client refetch.
+    pub fn set_muted(&self, channel: Id, user: Id, muted: bool) -> Result<ReadState> {
+        {
+            let conn = self.conn()?;
+            let n = conn
+                .prepare_cached(
+                    "UPDATE members SET muted = ? WHERE channel_id = ? AND user_id = ?",
+                )?
+                .execute(params![muted, to_sql(channel), to_sql(user)])?;
+            if n == 0 {
+                return Err(Error::Forbidden);
+            }
+        }
+        self.read_state(channel, user)
     }
 
     /// Advance a read cursor and return the resulting state.
@@ -418,7 +437,8 @@ impl Store {
                         SELECT 1 FROM mentions mn
                          WHERE mn.user_id = m.user_id AND mn.channel_id = m.channel_id
                            AND mn.message_id > m.last_read
-                         LIMIT {cap}))
+                         LIMIT {cap})),
+                    m.muted
                FROM members m WHERE m.channel_id = ? AND m.user_id = ?",
             cap = UNREAD_CAP + 1
         ))?
@@ -428,6 +448,7 @@ impl Store {
                 last_read: from_sql(r.get(0)?),
                 unread: r.get::<_, i64>(1)? as u32,
                 mentions: r.get::<_, i64>(2)? as u32,
+                muted: r.get(3)?,
             })
         })
         .optional()?
@@ -571,6 +592,39 @@ mod tests {
         let c = public(&f, "general");
         assert!(matches!(
             f.s.mark_read(c.id, f.bob, Id(1)),
+            Err(Error::Forbidden)
+        ));
+    }
+
+    #[test]
+    fn muting_is_per_user_and_leaves_the_counts_truthful() {
+        let f = fx();
+        let c = public(&f, "general");
+        f.s.join_channel(c.id, f.bob, 1).unwrap();
+
+        assert!(!f.s.read_state(c.id, f.alice).unwrap().muted);
+
+        let state = f.s.set_muted(c.id, f.alice, true).unwrap();
+        assert!(state.muted);
+        assert!(f.s.read_state(c.id, f.alice).unwrap().muted);
+        assert!(
+            !f.s.read_state(c.id, f.bob).unwrap().muted,
+            "muting is one person's preference, not a channel setting"
+        );
+
+        // Visible in the batch query the sidebar is painted from.
+        let all = f.s.read_states(f.alice).unwrap();
+        assert!(all.iter().find(|r| r.channel_id == c.id).unwrap().muted);
+
+        assert!(!f.s.set_muted(c.id, f.alice, false).unwrap().muted);
+    }
+
+    #[test]
+    fn muting_a_channel_you_are_not_in_is_forbidden() {
+        let f = fx();
+        let c = public(&f, "general");
+        assert!(matches!(
+            f.s.set_muted(c.id, f.bob, true),
             Err(Error::Forbidden)
         ));
     }
