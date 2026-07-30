@@ -9,8 +9,9 @@ web client with no framework.
 
 The goal is Slack's core, built so that a small deployment costs almost
 nothing and a large one degrades gracefully: a single binary, a single SQLite
-file, ~52 kB of JavaScript, and a realtime path that does one serialization per
-event rather than one per recipient.
+file, ~75 kB of JavaScript (27 kB gzipped) with no framework and no runtime
+dependencies, and a realtime path that does one serialization per event rather
+than one per recipient.
 
 ![A TensorChat channel](docs/screenshots/channel.png)
 
@@ -19,9 +20,10 @@ event rather than one per recipient.
 ## Features
 
 **Messaging** — channels (public and private), direct and group messages,
-threaded replies, editing, deletion, emoji reactions, file attachments, and
-`@mentions` with `@here` / `@channel`. Private channels are invite-only, and any
-member can add or remove people.
+threaded replies, editing, deletion, emoji reactions with a searchable picker
+and `:shortcode:` completion, file attachments, and `@mentions` with `@here` /
+`@channel`. Private channels are invite-only, and any member can add or remove
+people.
 
 **Realtime** — WebSocket delivery of messages, reactions, typing indicators,
 presence, membership changes, and read state, with automatic reconnection and

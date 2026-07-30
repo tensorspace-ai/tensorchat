@@ -24,6 +24,7 @@ import { idToDate } from '../protocol.ts';
 import { isEmojiOnly, renderBody } from '../richtext.ts';
 import type { Attachment, Id, Message } from '../protocol.ts';
 import type { Store } from '../store.ts';
+import { openEmojiPicker } from './emoji-picker.ts';
 import { avatar } from './sidebar.ts';
 
 /** Consecutive messages from one author within this window share a header. */
@@ -347,6 +348,29 @@ function hoverActions(store: Store, actions: MessageActions, m: Message): HTMLEl
       }),
     );
   }
+
+  // The quick set covers the common case in one click; the picker is for
+  // everything else, so neither has to be a compromise.
+  bar.appendChild(
+    el(
+      'button',
+      {
+        class: 'action',
+        title: 'Add reaction',
+        on: {
+          click: (ev: Event) =>
+            openEmojiPicker({
+              anchor: ev.currentTarget as HTMLElement,
+              onPick: (emoji) => {
+                const already = m.rx?.some((r) => r.e === emoji && r.me);
+                actions.react(m.id, emoji, !already);
+              },
+            }),
+        },
+      },
+      icon(ICONS.smile, 14),
+    ),
+  );
 
   bar.appendChild(
     el(

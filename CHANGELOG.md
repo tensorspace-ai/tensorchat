@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Emoji picker and `:shortcode:` completion** — a searchable picker on the
+  composer and the message hover bar, and inline completion sharing the
+  mention popover. Shortcodes expand on send, so what is stored is the emoji.
 - **Desktop notifications** — mentions and direct messages raise a browser
   notification when you are not already looking at them. Opt-in from
   Preferences. Client-side only; real Web Push is still not implemented.

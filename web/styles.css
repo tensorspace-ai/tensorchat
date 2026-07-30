@@ -1570,6 +1570,93 @@ mark {
   color: var(--accent);
 }
 
+
+/* ── Emoji picker ──────────────────────────────────────────────────── */
+
+/* Fixed, not absolute: the button that opens this often lives inside a
+   clipping scroll container (a message hover bar in the virtual list), and an
+   absolutely positioned popover would be cut off by it. */
+.emoji-picker {
+  position: fixed;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 332px;
+  max-height: 340px;
+  padding: 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-lg);
+}
+
+.emoji-search {
+  flex: none;
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 13.5px;
+}
+
+.emoji-search:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-softer);
+}
+
+/* Wrapping row rather than a column: browsing shows headings with a `.emoji-row`
+   under each, while a search drops cells straight in — one layout serves both. */
+.emoji-grid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-flow: row wrap;
+  align-content: flex-start;
+  gap: 2px;
+}
+
+.emoji-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  width: 100%;
+}
+
+.emoji-category {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  width: 100%;
+  padding: 6px 2px 3px;
+  background: var(--surface-1);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.emoji-cell {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  font-size: 19px;
+  line-height: 1;
+  transition: background var(--speed) var(--ease);
+}
+
+.emoji-cell:hover,
+.emoji-cell.active {
+  background: var(--hover-strong);
+}
+
 .pane-header {
   display: flex;
   align-items: center;

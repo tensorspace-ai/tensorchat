@@ -15,8 +15,10 @@
 
 import { ICONS, el, icon, replace } from '../dom.ts';
 import { effect } from '../signals.ts';
+import { expandShortcodes, searchEmoji } from '../emoji.ts';
 import type { Attachment, Id, User } from '../protocol.ts';
 import type { Store } from '../store.ts';
+import { openEmojiPicker } from './emoji-picker.ts';
 
 /** Minimum gap between typing frames sent to the server. */
 const TYPING_THROTTLE_MS = 3000;
@@ -73,6 +75,21 @@ export function Composer(
         icon(ICONS.paperclip, 17),
       ),
       input,
+      el(
+        'button',
+        {
+          class: 'icon-button',
+          title: 'Emoji',
+          on: {
+            click: (ev: Event) =>
+              openEmojiPicker({
+                anchor: ev.currentTarget as HTMLElement,
+                onPick: insertAtCaret,
+              }),
+          },
+        },
+        icon(ICONS.smile, 17),
+      ),
       sendButton,
       fileInput,
     ),
@@ -112,8 +129,22 @@ export function Composer(
     sendButton.disabled = input.value.trim().length === 0 && staged.length === 0;
   }
 
+  /** Drop text in at the caret and keep the caret after it. */
+  function insertAtCaret(text: string): void {
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? start;
+    input.value = input.value.slice(0, start) + text + input.value.slice(end);
+    const pos = start + text.length;
+    input.setSelectionRange(pos, pos);
+    autosize();
+    updateSendState();
+    input.focus();
+  }
+
   function submit(): void {
-    const body = input.value.trim();
+    // Expand `:shortcode:` on send rather than on render, so what is stored is
+    // the emoji itself and no receiver needs a shortcode table to read it.
+    const body = expandShortcodes(input.value.trim());
     if (!body && staged.length === 0) return;
     actions.send(body, staged.map((a) => a.id));
 
@@ -253,21 +284,52 @@ export function Composer(
     }
   });
 
-  // -- Mention autocomplete ----------------------------------------------
+  // -- Autocomplete -------------------------------------------------------
+  //
+  // `@handle` and `:shortcode:` share one popover, one selection index, and one
+  // set of key bindings. They differ only in what they match and what they
+  // insert, so they are two shapes of `Suggestion` rather than two mechanisms.
 
-  const suggestionState = { open: false, index: 0, matches: [] as User[], start: 0 };
+  /** `label` is the primary text, `hint` the dimmed one; `insert` is literal. */
+  type Suggestion = { label: string; hint: string; insert: string };
+
+  const suggestionState = { open: false, index: 0, matches: [] as Suggestion[], start: 0 };
 
   function updateSuggestions(): void {
     const upToCaret = input.value.slice(0, input.selectionStart ?? 0);
-    const m = /@([a-z0-9._-]*)$/i.exec(upToCaret);
-    if (!m) {
-      closeSuggestions();
+
+    const mention = /@([a-z0-9._-]*)$/i.exec(upToCaret);
+    if (mention) {
+      const query = mention[1].toLowerCase();
+      openSuggestions(
+        [...store.users().values()]
+          .filter((u: User) => !u.d && (u.h.startsWith(query) || u.n.toLowerCase().includes(query)))
+          .slice(0, 8)
+          .map((u: User) => ({ label: u.n || u.h, hint: `@${u.h}`, insert: `@${u.h} ` })),
+        upToCaret.length - mention[0].length,
+      );
       return;
     }
-    const query = m[1].toLowerCase();
-    const matches = [...store.users().values()]
-      .filter((u) => !u.d && (u.h.startsWith(query) || u.n.toLowerCase().includes(query)))
-      .slice(0, 8);
+
+    // Two characters before offering emoji: a bare `:` is far more often
+    // punctuation ("see below:") than the start of a shortcode.
+    const shortcode = /:([a-z0-9_+-]{2,})$/i.exec(upToCaret);
+    if (shortcode) {
+      openSuggestions(
+        searchEmoji(shortcode[1], 8).map((e) => ({
+          label: `${e.char}  :${e.name}:`,
+          hint: '',
+          insert: `${e.char} `,
+        })),
+        upToCaret.length - shortcode[0].length,
+      );
+      return;
+    }
+
+    closeSuggestions();
+  }
+
+  function openSuggestions(matches: Suggestion[], start: number): void {
     if (matches.length === 0) {
       closeSuggestions();
       return;
@@ -275,7 +337,7 @@ export function Composer(
     suggestionState.open = true;
     suggestionState.matches = matches;
     suggestionState.index = 0;
-    suggestionState.start = upToCaret.length - m[0].length;
+    suggestionState.start = start;
     renderSuggestions();
   }
 
@@ -283,7 +345,7 @@ export function Composer(
     suggestions.hidden = false;
     replace(
       suggestions,
-      suggestionState.matches.map((u, i) =>
+      suggestionState.matches.map((s, i) =>
         el(
           'button',
           {
@@ -295,8 +357,8 @@ export function Composer(
               },
             },
           },
-          el('span', { class: 'suggest-name', text: u.n || u.h }),
-          el('span', { class: 'suggest-handle', text: `@${u.h}` }),
+          el('span', { class: 'suggest-name', text: s.label }),
+          s.hint ? el('span', { class: 'suggest-handle', text: s.hint }) : null,
         ),
       ),
     );
@@ -309,14 +371,13 @@ export function Composer(
   }
 
   function acceptSuggestion(): void {
-    const user = suggestionState.matches[suggestionState.index];
-    if (!user) return;
+    const choice = suggestionState.matches[suggestionState.index];
+    if (!choice) return;
     const caret = input.selectionStart ?? input.value.length;
     const before = input.value.slice(0, suggestionState.start);
     const after = input.value.slice(caret);
-    const inserted = `@${user.h} `;
-    input.value = before + inserted + after;
-    const pos = before.length + inserted.length;
+    input.value = before + choice.insert + after;
+    const pos = before.length + choice.insert.length;
     input.setSelectionRange(pos, pos);
     closeSuggestions();
     autosize();
