@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Theme toggle** — System / Light / Dark in Preferences, replacing a light
+  theme that could only follow `prefers-color-scheme`. "System" remains the
+  default and keeps tracking the OS live. The light palette moved from a media
+  query to `:root[data-theme='light']` so it exists exactly once; a small
+  classic script stamps the resolved theme before the first paint, since the
+  main bundle is a module and therefore deferred, and the CSP has no
+  `unsafe-inline` to put it in the page.
 - **Inline message editing** — editing happens in the message row instead of a
   native `prompt()`, with Enter to save, Shift+Enter for a newline and Escape
   to cancel. Up-arrow on an empty composer opens your last message; the hook

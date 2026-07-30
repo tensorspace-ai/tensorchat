@@ -123,53 +123,60 @@
   --ease: cubic-bezier(0.2, 0, 0.2, 1);
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color-scheme: light;
+/* Light palette.
 
-    --bg: #ffffff;
-    --surface-1: #f6f7f9;
-    --surface-2: #ffffff;
-    --surface-3: #ffffff;
+   Keyed on an attribute rather than `prefers-color-scheme`, and written out
+   exactly once. `theme-boot.ts` stamps `data-theme` on <html> before the first
+   paint — resolving the stored preference, or the OS preference when that
+   preference is "system" — so this block covers the system default and an
+   explicit choice alike. Matching on the media query *as well* would mean a
+   second copy of every value below, in a file whose first rule is that colours
+   live in one place. */
+:root[data-theme='light'] {
+  color-scheme: light;
 
-    --border: rgba(16, 20, 28, 0.1);
-    --border-strong: rgba(16, 20, 28, 0.18);
+  --bg: #ffffff;
+  --surface-1: #f6f7f9;
+  --surface-2: #ffffff;
+  --surface-3: #ffffff;
 
-    --text: #15181f;
-    --text-secondary: #4d5563;
-    --text-muted: #7b8291;
+  --border: rgba(16, 20, 28, 0.1);
+  --border-strong: rgba(16, 20, 28, 0.18);
 
-    --hover: rgba(16, 20, 28, 0.045);
-    --hover-strong: rgba(16, 20, 28, 0.075);
-    --press: rgba(16, 20, 28, 0.1);
+  --text: #15181f;
+  --text-secondary: #4d5563;
+  --text-muted: #7b8291;
 
-    --accent: #5457e0;
-    --accent-hover: #4a4dd4;
-    --accent-press: #4144c4;
-    --accent-text: #4a4dd4;
-    --accent-soft: rgba(84, 87, 224, 0.12);
-    --accent-softer: rgba(84, 87, 224, 0.06);
-    --accent-line: rgba(84, 87, 224, 0.55);
-    --on-accent: #ffffff;
+  --hover: rgba(16, 20, 28, 0.045);
+  --hover-strong: rgba(16, 20, 28, 0.075);
+  --press: rgba(16, 20, 28, 0.1);
 
-    --danger: #d92d20;
-    --danger-text: #b42318;
-    --danger-soft: rgba(217, 45, 32, 0.1);
-    --online: #17a34a;
-    --away: #c2810c;
-    --offline: rgba(16, 20, 28, 0.26);
+  --accent: #5457e0;
+  --accent-hover: #4a4dd4;
+  --accent-press: #4144c4;
+  --accent-text: #4a4dd4;
+  --accent-soft: rgba(84, 87, 224, 0.12);
+  --accent-softer: rgba(84, 87, 224, 0.06);
+  --accent-line: rgba(84, 87, 224, 0.55);
+  --on-accent: #ffffff;
 
-    --mark-bg: rgba(84, 87, 224, 0.2);
-    --mark-text: #15181f;
+  --danger: #d92d20;
+  --danger-text: #b42318;
+  --danger-soft: rgba(217, 45, 32, 0.1);
+  --online: #17a34a;
+  --away: #c2810c;
+  --offline: rgba(16, 20, 28, 0.26);
 
-    --scrim: rgba(20, 24, 33, 0.4);
-    --shadow-sm: 0 1px 2px rgba(16, 20, 28, 0.07);
-    --shadow-md: 0 6px 20px -6px rgba(16, 20, 28, 0.16), 0 1px 3px rgba(16, 20, 28, 0.08);
-    --shadow-lg: 0 24px 60px -12px rgba(16, 20, 28, 0.24), 0 2px 8px rgba(16, 20, 28, 0.1);
+  --mark-bg: rgba(84, 87, 224, 0.2);
+  --mark-text: #15181f;
 
-    --scrollbar-thumb: rgba(16, 20, 28, 0.16);
-    --scrollbar-thumb-hover: rgba(16, 20, 28, 0.3);
-  }
+  --scrim: rgba(20, 24, 33, 0.4);
+  --shadow-sm: 0 1px 2px rgba(16, 20, 28, 0.07);
+  --shadow-md: 0 6px 20px -6px rgba(16, 20, 28, 0.16), 0 1px 3px rgba(16, 20, 28, 0.08);
+  --shadow-lg: 0 24px 60px -12px rgba(16, 20, 28, 0.24), 0 2px 8px rgba(16, 20, 28, 0.1);
+
+  --scrollbar-thumb: rgba(16, 20, 28, 0.16);
+  --scrollbar-thumb-hover: rgba(16, 20, 28, 0.3);
 }
 
 
@@ -2370,6 +2377,39 @@ dialog::backdrop {
   color: var(--text);
   font-size: 14.5px;
   font-weight: 650;
+}
+
+/* Segmented control for the theme. Three options, not two — "system" is a real
+   answer and a checkbox could not express it. */
+.theme-choice {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+}
+
+.theme-option {
+  flex: 1;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--text-md);
+  font-weight: 550;
+  transition:
+    background var(--speed) var(--ease),
+    color var(--speed) var(--ease);
+}
+
+.theme-option:hover:not(.is-selected) {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.theme-option.is-selected {
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 /* Confirmation of something that already happened, as opposed to `.modal-error`

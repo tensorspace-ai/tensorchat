@@ -4,6 +4,13 @@
  */
 
 import { mount } from './app.ts';
+import { applyTheme, readPreference, watchSystemTheme } from './theme.ts';
+
+// `theme-boot.ts` already stamped the document before first paint. Re-apply
+// here so a browser that blocked the classic script still gets the theme, and
+// start following the OS for anyone on "system".
+applyTheme(readPreference());
+watchSystemTheme();
 
 const root = document.getElementById('root');
 if (!root) {

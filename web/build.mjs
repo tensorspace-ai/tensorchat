@@ -55,19 +55,40 @@ async function build() {
   const jsFile = result.outputFiles.find((f) => f.path.endsWith('.js'));
   if (!jsFile) throw new Error('esbuild produced no JavaScript output');
 
+  // A second, tiny bundle: the theme stamp, which must run *before* the first
+  // paint. It cannot be part of the main bundle (a module, therefore deferred
+  // until after parsing) and it cannot be inlined into the page, because the
+  // CSP ships without `unsafe-inline`. So it is its own classic script.
+  const bootResult = await esbuild.build({
+    entryPoints: [join(here, 'src/theme-boot.ts')],
+    bundle: true,
+    format: 'iife',
+    target: ['es2022', 'chrome111', 'firefox113', 'safari16'],
+    minify: !dev,
+    resolveExtensions: ['.ts', '.js'],
+    write: false,
+    outdir: assetDir,
+    legalComments: 'none',
+  });
+  const bootFile = bootResult.outputFiles.find((f) => f.path.endsWith('.js'));
+  if (!bootFile) throw new Error('esbuild produced no theme-boot output');
+
   const css = await esbuild.transform(await readFile(join(here, 'styles.css'), 'utf8'), {
     loader: 'css',
     minify: !dev,
   });
 
   const jsName = dev ? 'app.js' : `app.${hash(jsFile.contents)}.js`;
+  const bootName = dev ? 'theme.js' : `theme.${hash(bootFile.contents)}.js`;
   const cssName = dev ? 'app.css' : `app.${hash(css.code)}.css`;
 
   await writeFile(join(assetDir, jsName), jsFile.contents);
+  await writeFile(join(assetDir, bootName), bootFile.contents);
   await writeFile(join(assetDir, cssName), css.code);
 
   // Point index.html at the hashed filenames.
   let html = await readFile(join(here, 'index.html'), 'utf8');
+  html = html.replaceAll('/assets/theme.js', `/assets/${bootName}`);
   html = html.replaceAll('/assets/app.js', `/assets/${jsName}`);
   html = html.replaceAll('/assets/app.css', `/assets/${cssName}`);
   await writeFile(join(outDir, 'index.html'), html);

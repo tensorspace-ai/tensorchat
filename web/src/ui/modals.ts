@@ -9,6 +9,7 @@
 
 import { el, replace } from '../dom.ts';
 import { ApiError, api } from '../api.ts';
+import { readPreference, setPreference, type ThemePreference } from '../theme.ts';
 import type { Channel, Id, Invite, User } from '../protocol.ts';
 import type { Notifier } from '../notify.ts';
 import type { Store } from '../store.ts';
@@ -728,6 +729,51 @@ export function manageInvitesDialog(): void {
   label.focus();
 }
 
+/**
+ * The three-way theme control.
+ *
+ * A segmented control rather than a checkbox, because there are genuinely three
+ * answers: a checkbox could only express light-or-dark and would lose "follow
+ * the system", which is both the default and the one that keeps working when
+ * the machine switches at dusk.
+ */
+function themeChoice(): HTMLElement {
+  const group = el('div', { class: 'theme-choice', role: 'radiogroup', 'aria-label': 'Theme' });
+  const options: [ThemePreference, string][] = [
+    ['system', 'System'],
+    ['light', 'Light'],
+    ['dark', 'Dark'],
+  ];
+
+  const buttons = options.map(([value, label]) =>
+    el('button', {
+      class: 'theme-option',
+      type: 'button',
+      role: 'radio',
+      text: label,
+      on: {
+        click: () => {
+          setPreference(value);
+          paint();
+        },
+      },
+    }),
+  );
+
+  function paint(): void {
+    const current = readPreference();
+    buttons.forEach((b, i) => {
+      const selected = options[i]![0] === current;
+      b.classList.toggle('is-selected', selected);
+      b.setAttribute('aria-checked', String(selected));
+    });
+  }
+
+  paint();
+  group.append(...buttons);
+  return group;
+}
+
 export function preferencesDialog(
   store: Store,
   notifier: Notifier,
@@ -847,6 +893,10 @@ export function preferencesDialog(
           },
         })
       : null,
+
+    el('hr', { class: 'modal-divider' }),
+    el('h3', { class: 'modal-section', text: 'Appearance' }),
+    themeChoice(),
 
     el('hr', { class: 'modal-divider' }),
     el('h3', { class: 'modal-section', text: 'Notifications' }),

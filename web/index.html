@@ -7,7 +7,15 @@
     <meta name="description" content="Fast, self-hosted team chat." />
     <meta name="color-scheme" content="dark light" />
     <!--
-      Both assets are content-hashed and served with a one-year immutable
+      Stamps `data-theme` on <html> from the stored preference. A classic,
+      non-deferred script placed ahead of the stylesheet, because it has to run
+      before the first paint: the main bundle is a module and therefore deferred,
+      so a light-theme user would otherwise see a flash of dark on every load.
+      It would normally be inlined, but the CSP ships without `unsafe-inline`.
+    -->
+    <script src="/assets/theme.js"></script>
+    <!--
+      All three assets are content-hashed and served with a one-year immutable
       cache; the build rewrites these hrefs. Preloading the module lets the
       browser start fetching it in parallel with the stylesheet rather than
       after it.
