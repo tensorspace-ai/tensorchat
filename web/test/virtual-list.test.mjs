@@ -370,3 +370,77 @@ test("single-item list mounts exactly one row without crashing", () => {
   assert.doesNotThrow(() => vl.setItems(makeItems(1, 20)));
   assert.equal(content.children.length, 1);
 });
+
+// ---------------------------------------------------------------------------
+// refresh(): repainting content that changed under stationary rows
+// ---------------------------------------------------------------------------
+
+test("refresh re-renders mounted rows that setItems alone would leave stale", () => {
+  // The bug this exists to prevent: a reaction landing on a message already on
+  // screen changed the item but not the *set* of items, so renderVisible left
+  // the row mounted and untouched and the change only appeared once the reader
+  // happened to scroll past it.
+  const { vl, counts, rowsByKey } = harness({ clientHeight: 100, estimateHeight: 20, overscan: 0 });
+  const items = makeItems(20, 20);
+  vl.setItems(items);
+  const before = counts();
+
+  // Same keys, same count — only the content of one row differs.
+  const changed = items.map((it) => (it.id === "m2" ? { ...it, height: 40 } : it));
+  vl.setItems(changed);
+  assert.equal(
+    counts().updateCalls,
+    before.updateCalls,
+    "setItems on its own must still not touch a row that never left the window",
+  );
+
+  vl.refresh();
+  assert.ok(counts().updateCalls > before.updateCalls, "refresh repaints mounted rows");
+  assert.equal(rowsByKey.get("m2").offsetHeight, 40, "the row now shows the new content");
+});
+
+test("refresh re-measures, so a row that grew shifts the rows below it", () => {
+  const { vl, content } = harness({ clientHeight: 100, estimateHeight: 20, overscan: 0 });
+  const items = makeItems(20, 20);
+  vl.setItems(items);
+  const totalBefore = content.style.height;
+
+  // An inline editor opening is exactly this: one row becomes much taller.
+  vl.setItems(items.map((it) => (it.id === "m1" ? { ...it, height: 90 } : it)));
+  vl.refresh();
+
+  assert.notEqual(
+    content.style.height,
+    totalBefore,
+    "the total height must account for the row that grew",
+  );
+});
+
+test("refresh only touches mounted rows, not the whole list", () => {
+  const { vl, counts } = harness({ clientHeight: 100, estimateHeight: 20, overscan: 0 });
+  vl.setItems(makeItems(10000, 20));
+  const before = counts().updateCalls;
+
+  vl.refresh();
+
+  // Roughly a viewport's worth, not ten thousand — this is what makes it cheap
+  // enough to call on every data change.
+  const touched = counts().updateCalls - before;
+  assert.ok(touched > 0 && touched < 50, `expected a windowful, got ${touched}`);
+});
+
+test("refresh without updateRow is a no-op rather than a crash", () => {
+  // Without updateRow there is no way to refresh an element in place, and
+  // re-creating it would defeat the recycling refresh exists to serve.
+  const { vl, counts } = harness({ withUpdateRow: false });
+  vl.setItems(makeItems(20, 20));
+  const before = counts();
+  assert.doesNotThrow(() => vl.refresh());
+  assert.deepEqual(counts(), before);
+});
+
+test("refresh on an empty list does nothing", () => {
+  const { vl } = harness();
+  vl.setItems([]);
+  assert.doesNotThrow(() => vl.refresh());
+});

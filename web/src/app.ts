@@ -15,7 +15,7 @@ import { idCompare } from './protocol.ts';
 import type { Channel, Id } from './protocol.ts';
 import { Composer } from './ui/composer.ts';
 import { LoginScreen } from './ui/login.ts';
-import { MessageList, type MessageActions } from './ui/messages.ts';
+import { MessageList, beginEdit, cancelEdit, isEditing, type MessageActions } from './ui/messages.ts';
 import { MemberList, PinnedPane, SavedPane, SearchOverlay, ThreadPane } from './ui/panels.ts';
 import { Sidebar } from './ui/sidebar.ts';
 import {
@@ -245,10 +245,9 @@ function start(root: HTMLElement): void {
       void navigator.clipboard?.writeText(url).catch(() => prompt('Link to message', url));
     },
     openThread: (rootId) => store.openThread.set(rootId),
-    edit: (id, body) => {
-      const next = prompt('Edit message', body);
-      if (next !== null && next.trim() && next !== body) conn.editMessage(id, next.trim());
-    },
+    // The editor itself lives in the message row; by the time this is called
+    // the new body has already been composed and confirmed.
+    edit: (id, body) => conn.editMessage(id, body),
     remove: (id) => conn.deleteMessage(id),
     loadOlder: () => {
       const channel = store.currentChannel();
@@ -305,6 +304,16 @@ function start(root: HTMLElement): void {
       if (channel) conn.typing(channel);
     },
     upload: (file) => api.upload(file),
+    // Up-arrow on an empty composer opens the last thing you said. The hook
+    // existed in the composer but had never been connected to anything.
+    editLast: () => {
+      const channel = store.currentChannel();
+      const meId = store.me()?.id;
+      if (!channel || !meId) return;
+      const mine = store.log(channel).messages.filter((m) => m.au === meId && !m.del && !m.th);
+      const last = mine[mine.length - 1];
+      if (last) beginEdit(last.id, last.b);
+    },
   }, {
     placeholder: () => {
       const channel = store.currentChannel();
@@ -436,6 +445,13 @@ function start(root: HTMLElement): void {
       return;
     }
     if (ev.key === 'Escape') {
+      // Reached only when focus has left the editor's textarea — the editor
+      // stops the event itself while focused. Closing it still takes priority
+      // over the thread pane, since it is the more local thing on screen.
+      if (isEditing()) {
+        cancelEdit();
+        return;
+      }
       if (store.openThread()) store.openThread.set(null);
       return;
     }

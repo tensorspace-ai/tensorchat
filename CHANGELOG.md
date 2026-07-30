@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Inline message editing** — editing happens in the message row instead of a
+  native `prompt()`, with Enter to save, Shift+Enter for a newline and Escape
+  to cancel. Up-arrow on an empty composer opens your last message; the hook
+  for that existed but had never been connected. The editor survives the
+  virtual list recycling its row mid-edit, caret position included.
 - **Drafts survive a reload** — unsent text moved from an in-memory `Map` to
   `localStorage`. Writes are debounced so typing never blocks on a synchronous
   disk write, and flushed on `pagehide` and on the tab being hidden so a reload
@@ -67,6 +72,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A reaction, pin, or edit landing on a message that was already on screen now
+  repaints it. `VirtualList` deliberately leaves an already-mounted,
+  still-visible row alone so that scrolling does not rebuild stationary rows —
+  correct for scrolling, but it also meant a change to a visible message's
+  *content* was invisible until the reader happened to scroll it out of the
+  window and back. A new `VirtualList.refresh()` repaints mounted rows, and the
+  message list calls it whenever the data behind them changes.
 - Login no longer succeeds for a deactivated account. It previously issued a
   token that then failed on every authenticated request, because `session_user`
   filtered deactivated accounts but `user_for_login` did not.

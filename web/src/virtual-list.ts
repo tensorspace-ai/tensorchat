@@ -199,6 +199,39 @@ export class VirtualList<T> {
     this.renderVisible();
   }
 
+  /**
+   * Re-render every currently-mounted row from the latest items, then
+   * re-measure.
+   *
+   * `renderVisible` deliberately leaves an already-mounted, still-desired row
+   * untouched — otherwise a stable row would be rebuilt on every scroll frame,
+   * which is the whole point of keeping it mounted. That is right for
+   * *scrolling* and wrong for a *content* change: a reaction landing on a
+   * message that is already on screen, or a pin, or an inline editor opening,
+   * changes what a row should show without changing the set of rows. Without
+   * this, such a change only appeared once the row happened to be recycled by
+   * scrolling past it.
+   *
+   * Callers invoke this after `setItems` when item *contents* may have changed,
+   * not just the item set. It touches only mounted rows — a dozen or so — so it
+   * is cheap enough to call on every data change; it is scroll frames, not data
+   * changes, that this class is careful about.
+   *
+   * A no-op without `updateRow`: there would be no way to refresh an element in
+   * place, and re-creating it would defeat the recycling this exists to serve.
+   */
+  refresh(): void {
+    if (this.destroyed || this.opts.updateRow === undefined) return;
+    const indices: number[] = [];
+    for (const row of this.mounted.values()) {
+      const item = this.items[row.index];
+      if (item === undefined) continue;
+      this.opts.updateRow(row.el, item, row.index);
+      indices.push(row.index);
+    }
+    if (indices.length > 0) this.measureRows(indices);
+  }
+
   /** Re-measure one row (if mounted), or every currently-mounted row. */
   invalidate(index?: number): void {
     if (this.destroyed) return;

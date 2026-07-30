@@ -17,7 +17,7 @@
  */
 
 import { ICONS, el, formatDayLabel, formatFullTime, formatSize, formatTime, icon, replace, sameDay } from '../dom.ts';
-import { effect } from '../signals.ts';
+import { effect, signal } from '../signals.ts';
 import { VirtualList } from '../virtual-list.ts';
 import { fileUrl } from '../api.ts';
 import { idToDate } from '../protocol.ts';
@@ -109,6 +109,10 @@ export function MessageList(store: Store, actions: MessageActions): HTMLElement 
     const rows = buildRows(store, channel, log.messages);
     const wasPinned = list.isPinnedToBottom();
     list.setItems(rows);
+    // Everything above can change what an *already visible* row should show —
+    // a reaction, a pin, an edit, the inline editor opening — without changing
+    // which rows exist. `setItems` alone leaves those rows mounted and stale.
+    list.refresh();
 
     // A window loaded around some older message opens *on* that message rather
     // than at the bottom, which for a historical excerpt would be an arbitrary
@@ -130,6 +134,10 @@ export function MessageList(store: Store, actions: MessageActions): HTMLElement 
   effect(() => {
     store.currentChannel();
     loadArmed = true;
+    // An editor left open in a channel you have navigated away from would keep
+    // its session alive and reopen on return, over a message the author may no
+    // longer even mean to change.
+    cancelEdit();
     list.scrollToBottom();
   });
 
@@ -170,6 +178,126 @@ function buildRows(store: Store, channel: Id, messages: Message[]): Row[] {
     rows.push({ kind: 'pending', key: `pending-${p.nonce}`, body: p.body, failed: p.failed });
   }
   return rows;
+}
+
+// -- Inline editing ---------------------------------------------------------
+
+/**
+ * Which message is open in the editor.
+ *
+ * A signal, so opening or closing the editor repaints the row through the same
+ * effect that repaints everything else. The *text* being typed deliberately is
+ * not a signal — see [`session`].
+ */
+const editingId = signal<Id | null>(null);
+
+/**
+ * The in-progress edit, held outside the reactive graph on purpose.
+ *
+ * The row this lives in is recycled by the virtual list: a message arriving, a
+ * reaction landing, or a scroll can rebuild it at any moment. So the text has
+ * to survive outside the DOM — but it must not be a *signal*, or every
+ * keystroke would repaint the row and take the caret with it. Instead the
+ * textarea writes here on input, and a rebuilt textarea reads back from here,
+ * caret position included.
+ */
+let session: { id: Id; text: string; start: number; end: number } | null = null;
+
+export function beginEdit(id: Id, body: string): void {
+  session = { id, text: body, start: body.length, end: body.length };
+  editingId.set(id);
+}
+
+export function cancelEdit(): void {
+  session = null;
+  editingId.set(null);
+}
+
+export function isEditing(): boolean {
+  return editingId.peek() !== null;
+}
+
+/**
+ * The editor that replaces a message body in place.
+ *
+ * Keyboard contract matches the composer, because the muscle memory is the
+ * same: Enter commits, Shift+Enter adds a line, Escape abandons.
+ */
+function messageEditor(actions: MessageActions, m: Message): HTMLElement {
+  const input = el('textarea', {
+    class: 'edit-input',
+    rows: 1,
+    'aria-label': 'Edit message',
+  }) as HTMLTextAreaElement;
+  input.value = session?.text ?? m.b;
+
+  const autosize = () => {
+    input.style.height = 'auto';
+    input.style.height = `${Math.min(input.scrollHeight, 22 * 12)}px`;
+  };
+
+  const remember = () => {
+    if (session) {
+      session.text = input.value;
+      session.start = input.selectionStart ?? input.value.length;
+      session.end = input.selectionEnd ?? session.start;
+    }
+  };
+
+  const commit = () => {
+    const next = input.value.trim();
+    // An edit to nothing is a delete in disguise; the server would refuse an
+    // empty body anyway, so treat it as a cancel rather than an error.
+    if (next && next !== m.b) actions.edit(m.id, next);
+    cancelEdit();
+  };
+
+  input.addEventListener('input', () => {
+    remember();
+    autosize();
+  });
+  // Arrow keys and clicks move the caret without firing `input`, and a rebuild
+  // in between would otherwise drop it back to where the last keystroke was.
+  input.addEventListener('keyup', remember);
+  input.addEventListener('click', remember);
+
+  input.addEventListener('keydown', (ev: KeyboardEvent) => {
+    if (ev.key === 'Enter' && !ev.shiftKey) {
+      ev.preventDefault();
+      commit();
+    } else if (ev.key === 'Escape') {
+      ev.preventDefault();
+      // Stop here rather than letting it bubble: the document-level handler
+      // reads Escape as "close the thread pane", and abandoning an edit should
+      // not also collapse the conversation around it.
+      ev.stopPropagation();
+      cancelEdit();
+    }
+  });
+
+  // The row is not in the document yet — the virtual list inserts it after this
+  // returns — so focus has to wait for the next frame. Restoring the caret is
+  // what makes a mid-typing rebuild invisible.
+  requestAnimationFrame(() => {
+    if (!input.isConnected) return;
+    autosize();
+    input.focus();
+    const { start, end } = session ?? { start: input.value.length, end: input.value.length };
+    input.setSelectionRange(start, end);
+  });
+
+  return el(
+    'div',
+    { class: 'message-edit' },
+    input,
+    el(
+      'div',
+      { class: 'edit-actions' },
+      el('button', { class: 'edit-save', text: 'Save', on: { click: commit } }),
+      el('button', { class: 'edit-cancel', text: 'Cancel', on: { click: cancelEdit } }),
+      el('span', { class: 'edit-hint', text: 'Enter to save · Escape to cancel' }),
+    ),
+  );
 }
 
 function renderRow(store: Store, actions: MessageActions, row: Row): HTMLElement {
@@ -254,8 +382,17 @@ export function renderMessage(
     );
   }
 
+  // Read unconditionally, so the enclosing effect subscribes whether or not
+  // this particular row is the one being edited.
+  const openEditor = editingId();
+
   if (m.del) {
     main.appendChild(el('div', { class: 'message-body tombstone', text: 'This message was deleted' }));
+  } else if (openEditor === m.id) {
+    main.appendChild(messageEditor(actions, m));
+    // No hover bar and no reactions while editing: the row is a form, and
+    // offering "delete" beside a half-typed correction invites a misclick.
+    if (m.at?.length) main.appendChild(attachments(m.at));
   } else {
     const body = el('div', {
       class: `message-body${isEmojiOnly(m.b) ? ' jumbo' : ''}`,
@@ -449,7 +586,7 @@ function hoverActions(store: Store, actions: MessageActions, m: Message): HTMLEl
     bar.appendChild(
       el(
         'button',
-        { class: 'action', title: 'Edit', on: { click: () => actions.edit(m.id, m.b) } },
+        { class: 'action', title: 'Edit', on: { click: () => beginEdit(m.id, m.b) } },
         icon(ICONS.edit, 14),
       ),
     );

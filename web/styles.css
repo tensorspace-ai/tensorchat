@@ -999,6 +999,84 @@ ul, ol {
   font-style: italic;
 }
 
+/* Inline editing.
+
+   The editor stands in for the message body in place, so the row keeps its
+   position in the scroll and the surrounding conversation does not move. It
+   borrows the composer's box treatment because it is the same gesture: a
+   focused text field you commit with Enter. */
+
+.message-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 1px 0 3px;
+}
+
+/* Height is driven by the autosizer in messages.ts — never set it here. */
+.edit-input {
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  box-shadow: 0 0 0 3px var(--accent-softer);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--text-base);
+  line-height: 22px;
+  resize: none;
+  outline: none;
+  overflow-y: auto;
+}
+
+.edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.edit-save,
+.edit-cancel {
+  padding: 4px 11px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  transition: background var(--speed) var(--ease);
+}
+
+.edit-save {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.edit-save:hover {
+  background: var(--accent-hover);
+}
+
+.edit-cancel {
+  background: var(--surface-3);
+  color: var(--text-secondary);
+}
+
+.edit-cancel:hover {
+  background: var(--hover-strong);
+  color: var(--text);
+}
+
+.edit-hint {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+/* The hint is the first thing worth dropping on a narrow screen: the buttons
+   say the same thing and are reachable by thumb. */
+@media (max-width: 620px) {
+  .edit-hint {
+    display: none;
+  }
+}
+
 /* Emoji-only messages read as a reaction, not a sentence. */
 .message-body.jumbo .para {
   font-size: 32px;
