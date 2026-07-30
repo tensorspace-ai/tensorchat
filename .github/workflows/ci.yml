@@ -77,8 +77,11 @@ jobs:
       - name: Install
         run: npm ci
 
+      # The script, not `tsc` directly: the service worker is checked under its
+      # own config (WebWorker and DOM declare conflicting globals), and invoking
+      # the compiler by hand would silently skip it.
       - name: Type check
-        run: npx tsc --noEmit
+        run: npm run typecheck
 
       - name: Test
         run: npm test
