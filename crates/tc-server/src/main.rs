@@ -51,8 +51,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Periodic housekeeping: expire sessions, checkpoint the WAL, refresh planner
-/// statistics.
+/// How long a spent invite lingers before housekeeping drops it.
+///
+/// Not zero, because an administrator asking "did that link ever get used?" a
+/// week later deserves an answer. Expiry is enforced at redemption regardless,
+/// so this only governs when the row stops taking up space.
+const INVITE_RETENTION_MS: u64 = 30 * 24 * 60 * 60 * 1000;
+
+/// Periodic housekeeping: expire sessions and invites, checkpoint the WAL,
+/// refresh planner statistics.
 fn spawn_maintenance(st: Shared) {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(3600));
@@ -65,12 +72,16 @@ fn spawn_maintenance(st: Shared) {
             let r = st
                 .db(move |s| {
                     let purged = s.purge_expired_sessions(now)?;
+                    // Saturating, so a clock before the epoch cannot wrap the
+                    // cutoff into the far future and delete live invites.
+                    let invites =
+                        s.purge_expired_invites(now.saturating_sub(INVITE_RETENTION_MS))?;
                     s.maintenance()?;
-                    Ok(purged)
+                    Ok(purged + invites)
                 })
                 .await;
             match r {
-                Ok(n) if n > 0 => tracing::info!(purged = n, "maintenance: expired sessions"),
+                Ok(n) if n > 0 => tracing::info!(purged = n, "maintenance: expired rows"),
                 Ok(_) => tracing::debug!("maintenance complete"),
                 Err(e) => tracing::warn!(error = %e, "maintenance failed"),
             }

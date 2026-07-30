@@ -19,6 +19,9 @@ use tower::ServiceExt;
 /// A test harness holding the router and a synthetic client address.
 struct App {
     router: Router,
+    /// Kept so a test can stand the router back up under a different config
+    /// against the same data. See [`App::reconfigure`].
+    store: tc_store::Store,
 }
 
 impl App {
@@ -28,9 +31,24 @@ impl App {
 
     fn with_config(cfg: Config) -> App {
         let store = tc_store::Store::open_in_memory().expect("in-memory store");
-        let st = Arc::new(AppState::new(cfg, store));
+        let st = Arc::new(AppState::new(cfg, store.clone()));
         App {
             router: build_router(st),
+            store,
+        }
+    }
+
+    /// Rebuild the router under a new config, keeping the database.
+    ///
+    /// Models the one sequence an operator actually performs: bring the
+    /// workspace up open, claim the administrator account, then close
+    /// registration and restart. Config is read once at startup, so there is no
+    /// way to express that without standing the router up twice.
+    fn reconfigure(self, cfg: Config) -> App {
+        let st = Arc::new(AppState::new(cfg, self.store.clone()));
+        App {
+            router: build_router(st),
+            store: self.store,
         }
     }
 
@@ -2094,4 +2112,300 @@ async fn metrics_report_the_fanout_ratio() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(metrics["connections"], 0);
     assert!(metrics["fanout_ratio"].is_number());
+}
+
+// ---------------------------------------------------------------- invites
+
+/// Register with an explicit invite token, returning the raw response.
+async fn register_with_invite(
+    app: &App,
+    handle: &str,
+    invite: &str,
+    peer: &str,
+) -> (StatusCode, Value) {
+    app.send_from(
+        "POST",
+        "/api/register",
+        None,
+        Some(json!({
+            "handle": handle,
+            "password": "correct horse battery",
+            "invite": invite,
+        })),
+        peer,
+    )
+    .await
+}
+
+/// A workspace with registration closed and one administrator — the shape of
+/// every deployment that does not want the open internet signing up.
+///
+/// Built by opening, claiming the administrator, then closing, because that is
+/// the only sequence that actually works: an empty closed workspace has nobody
+/// who can mint the first invite.
+async fn closed_workspace() -> (App, String) {
+    let app = App::with_config(Config::default());
+    let (admin, _) = app.account("alice").await;
+    let app = app.reconfigure(Config {
+        open_registration: false,
+        ..Config::default()
+    });
+    (app, admin)
+}
+
+#[tokio::test]
+async fn an_invite_admits_an_account_to_a_closed_workspace() {
+    // The hole this feature exists to fill: with open registration off and no
+    // invite, there was no way at all to add the second person.
+    let (app, admin) = closed_workspace().await;
+
+    let (status, invite) = app
+        .send(
+            "POST",
+            "/api/admin/invites",
+            Some(&admin),
+            Some(json!({ "label": "design team" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{invite}");
+    let token = invite["token"]
+        .as_str()
+        .expect("the link is shown once, at creation")
+        .to_string();
+    assert_eq!(invite["uses"], 0);
+    assert_eq!(invite["max_uses"], 1, "single use by default");
+    assert_eq!(invite["live"], true);
+    assert!(invite["expires_at"].is_number(), "expiring by default");
+
+    let (status, body) = register_with_invite(&app, "bob", &token, "10.1.0.1:1").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["user"]["h"], "bob");
+    // `adm` is omitted when false, so its absence is the assertion.
+    assert!(
+        body["user"].get("adm").is_none(),
+        "an invited account is an ordinary member: {}",
+        body["user"]
+    );
+    // And the session it returns is a real one.
+    let bob = body["token"].as_str().unwrap();
+    let (status, me) = app.send("GET", "/api/me", Some(bob), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(me["h"], "bob");
+
+    // The seat is spent, so the link stops working.
+    let (status, body) = register_with_invite(&app, "carol", &token, "10.1.0.2:1").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap()
+            .contains("no longer valid")
+    );
+}
+
+#[tokio::test]
+async fn registration_stays_closed_without_an_invite() {
+    let (app, admin) = closed_workspace().await;
+    // Mint one so the table is non-empty: an existing invite must not become a
+    // skeleton key for requests that do not present it.
+    let (status, _) = app
+        .send("POST", "/api/admin/invites", Some(&admin), Some(json!({})))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _) = app
+        .send(
+            "POST",
+            "/api/register",
+            None,
+            Some(json!({ "handle": "bob", "password": "correct horse battery" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn a_forged_or_revoked_invite_is_refused() {
+    let (app, admin) = closed_workspace().await;
+
+    // A token nobody ever minted.
+    let (status, body) = register_with_invite(&app, "bob", "not-a-real-token", "10.2.0.1:1").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let forged_message = body["message"].as_str().unwrap().to_string();
+
+    // A real one, revoked before use.
+    let (_, invite) = app
+        .send(
+            "POST",
+            "/api/admin/invites",
+            Some(&admin),
+            Some(json!({ "max_uses": 0 })),
+        )
+        .await;
+    let token = invite["token"].as_str().unwrap().to_string();
+    let id = invite["id"].as_str().unwrap();
+    let (status, _) = app
+        .send(
+            "DELETE",
+            &format!("/api/admin/invites/{id}"),
+            Some(&admin),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (status, body) = register_with_invite(&app, "bob", &token, "10.2.0.2:1").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        body["message"].as_str().unwrap(),
+        forged_message,
+        "a revoked invite must be indistinguishable from one that never existed"
+    );
+}
+
+#[tokio::test]
+async fn only_administrators_can_mint_invites() {
+    // Otherwise any member could grow the workspace, which is the same
+    // privilege as creating accounts.
+    let app = App::new();
+    let (_admin, _) = app.account("alice").await;
+    let (bob, _) = app.account("bob").await;
+
+    for (method, path) in [
+        ("POST", "/api/admin/invites"),
+        ("GET", "/api/admin/invites"),
+    ] {
+        let (status, _) = app.send(method, path, Some(&bob), Some(json!({}))).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{method} {path}");
+    }
+    let (status, _) = app
+        .send("POST", "/api/admin/invites", None, Some(json!({})))
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn an_invite_can_be_checked_before_the_sign_up_form_is_shown() {
+    let (app, admin) = closed_workspace().await;
+    let (_, invite) = app
+        .send(
+            "POST",
+            "/api/admin/invites",
+            Some(&admin),
+            Some(json!({ "max_uses": 1 })),
+        )
+        .await;
+    let token = invite["token"].as_str().unwrap().to_string();
+
+    // Unauthenticated by necessity: the caller has no account yet.
+    let (status, body) = app
+        .send("GET", &format!("/api/invites/{token}"), None, None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["valid"], true);
+
+    let (status, body) = app.send("GET", "/api/invites/nonsense", None, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["valid"], false, "and it never leaks why");
+
+    // Spending it flips the answer.
+    register_with_invite(&app, "bob", &token, "10.3.0.1:1").await;
+    let (_, body) = app
+        .send("GET", &format!("/api/invites/{token}"), None, None)
+        .await;
+    assert_eq!(body["valid"], false);
+}
+
+#[tokio::test]
+async fn listing_invites_never_reveals_a_live_link() {
+    // The token is shown once, at creation. If listing returned it, a leaked
+    // database or a compromised admin session would hand out working links.
+    let (app, admin) = closed_workspace().await;
+    app.send(
+        "POST",
+        "/api/admin/invites",
+        Some(&admin),
+        Some(json!({ "label": "contractors", "max_uses": 5 })),
+    )
+    .await;
+
+    let (status, list) = app
+        .send("GET", "/api/admin/invites", Some(&admin), None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let rows = list.as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["label"], "contractors");
+    assert_eq!(rows[0]["max_uses"], 5);
+    assert!(
+        rows[0].get("token").is_none(),
+        "a listing must never carry the secret: {}",
+        rows[0]
+    );
+}
+
+#[tokio::test]
+async fn an_unlimited_invite_admits_several_accounts() {
+    let (app, admin) = closed_workspace().await;
+    let (_, invite) = app
+        .send(
+            "POST",
+            "/api/admin/invites",
+            Some(&admin),
+            // Zero for both is the explicit "never expires, no cap" request.
+            Some(json!({ "max_uses": 0, "expires_in_hours": 0 })),
+        )
+        .await;
+    assert!(invite["expires_at"].is_null(), "zero hours means no expiry");
+    let token = invite["token"].as_str().unwrap().to_string();
+
+    for (i, who) in ["bob", "carol", "dave"].iter().enumerate() {
+        // Distinct peers: the shared limiter is per-address, and this test is
+        // about the invite's cap, not the rate limit's.
+        let peer = format!("10.4.0.{}:1", i + 1);
+        let (status, body) = register_with_invite(&app, who, &token, &peer).await;
+        assert_eq!(status, StatusCode::OK, "{who}: {body}");
+    }
+
+    let (_, list) = app
+        .send("GET", "/api/admin/invites", Some(&admin), None)
+        .await;
+    assert_eq!(list[0]["uses"], 3);
+    assert_eq!(list[0]["live"], true, "no cap means no exhaustion");
+}
+
+#[tokio::test]
+async fn an_invite_cannot_outlive_a_year() {
+    let (app, admin) = closed_workspace().await;
+    let (status, _) = app
+        .send(
+            "POST",
+            "/api/admin/invites",
+            Some(&admin),
+            Some(json!({ "expires_in_hours": 24 * 400 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn a_taken_handle_does_not_burn_an_invite_seat() {
+    // Someone who picks a name that is already in use must be able to try again
+    // with a different one rather than needing a fresh link.
+    let (app, admin) = closed_workspace().await;
+    let (_, invite) = app
+        .send(
+            "POST",
+            "/api/admin/invites",
+            Some(&admin),
+            Some(json!({ "max_uses": 1 })),
+        )
+        .await;
+    let token = invite["token"].as_str().unwrap().to_string();
+
+    let (status, _) = register_with_invite(&app, "alice", &token, "10.5.0.1:1").await;
+    assert_eq!(status, StatusCode::CONFLICT, "alice already exists");
+
+    let (status, body) = register_with_invite(&app, "bob", &token, "10.5.0.2:1").await;
+    assert_eq!(status, StatusCode::OK, "the seat survived: {body}");
 }

@@ -42,6 +42,9 @@ pub fn routes() -> Router<Shared> {
             get(list_bot_tokens).post(create_bot_token),
         )
         .route("/api/admin/tokens/{id}", delete(revoke_bot_token))
+        .route("/api/admin/invites", get(list_invites).post(create_invite))
+        .route("/api/admin/invites/{id}", delete(revoke_invite))
+        .route("/api/invites/{token}", get(check_invite))
         .route("/api/hooks/{token}", post(incoming_hook))
         .route("/api/channels", get(my_channels).post(create_channel))
         .route("/api/channels/browse", get(browse_channels))
@@ -84,6 +87,9 @@ pub struct RegisterReq {
     handle: String,
     display_name: Option<String>,
     password: String,
+    /// An invite token, admitting this account even when open registration is
+    /// closed. See [`register`] for how the two interact.
+    invite: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -112,14 +118,27 @@ fn session_response(token: String, user: User, secure: bool) -> Response {
     (headers, Json(SessionRes { token, user })).into_response()
 }
 
+/// Create an account.
+///
+/// Two ways in, and exactly one rule for choosing between them: **an invite, if
+/// supplied, must be valid; without one, open registration must be on.**
+///
+/// A supplied-but-dead invite is refused rather than quietly falling back to
+/// open registration. The fallback would make the same link behave differently
+/// depending on a server setting the person clicking it cannot see — and would
+/// mean turning `TC_OPEN_REGISTRATION` off later silently changed what an
+/// already-circulated URL does.
 async fn register(
     State(st): State<Shared>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Json(req): Json<RegisterReq>,
 ) -> ApiResult<Response> {
-    if !st.cfg.open_registration {
+    if req.invite.is_none() && !st.cfg.open_registration {
         return Err(ApiError::Forbidden);
     }
+    // Rate-limited even when an invite is presented. An unlimited-use link is a
+    // legitimate thing to hand out, and it should not also be a way to create
+    // ten thousand accounts from one host.
     if !st.login_limiter.allow(peer.ip()) {
         return Err(ApiError::RateLimited);
     }
@@ -137,7 +156,25 @@ async fn register(
     let phc = auth::hash_password(&req.password)?;
     let id = st.next_id();
     let (h, d) = (handle.clone(), display.clone());
-    let user = st.db(move |s| s.create_user(id, &h, &d, &phc)).await?;
+    let user = match req.invite {
+        // Seat claim and account insert share one transaction inside the store,
+        // so a single-use link cannot admit two people who race each other.
+        Some(token) => {
+            let hash = auth::token_hash(&token);
+            let now = now_ms();
+            st.db(move |s| s.create_user_via_invite(id, &h, &d, &phc, &hash, now))
+                .await
+                .map_err(|e| match e {
+                    // Unknown, expired and exhausted arrive as one error and
+                    // leave as one message, so a probe cannot learn which.
+                    ApiError::Forbidden => {
+                        ApiError::BadRequest("that invite is no longer valid".into())
+                    }
+                    other => other,
+                })?
+        }
+        None => st.db(move |s| s.create_user(id, &h, &d, &phc)).await?,
+    };
 
     let token = auth::new_session_token();
     let hash = token.hash;
@@ -492,6 +529,154 @@ async fn revoke_bot_token(
 ) -> ApiResult<StatusCode> {
     st.db(move |s| s.delete_api_token(id)).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+// ---------------------------------------------------------------- invites
+
+/// The longest life an invite may be given, in hours (about a year). Not a
+/// security boundary — a caller can always mint another — but a link with no
+/// horizon at all is usually a mistake rather than a decision.
+const MAX_INVITE_HOURS: u64 = 24 * 366;
+
+#[derive(Deserialize)]
+pub struct CreateInviteReq {
+    /// What the link is for, so a stale one is identifiable months later.
+    #[serde(default)]
+    label: String,
+    /// Hours until expiry. `None` means the default; `Some(0)` means never.
+    expires_in_hours: Option<u64>,
+    /// How many accounts it may create. `None` means the default; `Some(0)`
+    /// means unlimited.
+    max_uses: Option<u32>,
+}
+
+#[derive(Serialize)]
+pub struct InviteRes {
+    id: Id,
+    label: String,
+    created_at: u64,
+    expires_at: Option<u64>,
+    max_uses: u32,
+    uses: u32,
+    /// Whether it would still be accepted, computed server-side so the client
+    /// does not re-derive the rule and get it subtly wrong.
+    live: bool,
+    /// Present **only** in the response that creates the invite. Nothing stored
+    /// server-side can reconstruct it, so a lost link is reissued, not
+    /// recovered.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    token: Option<String>,
+}
+
+fn invite_res(i: tc_store::Invite, token: Option<String>, now: u64) -> InviteRes {
+    InviteRes {
+        live: i.is_live(now),
+        id: i.id,
+        label: i.label,
+        created_at: i.created_at,
+        expires_at: i.expires_at,
+        max_uses: i.max_uses,
+        uses: i.uses,
+        token,
+    }
+}
+
+/// Default life of an invite: a week is long enough to reach someone who is
+/// away, short enough that a link forgotten in a chat log stops working.
+const DEFAULT_INVITE_HOURS: u64 = 24 * 7;
+
+/// Mint an invite link.
+///
+/// Administrator-only, because it is the mechanism by which the workspace grows
+/// — the same reason creating bots is. The defaults are the conservative
+/// combination (one week, one use); an unlimited link is available but has to be
+/// asked for.
+async fn create_invite(
+    State(st): State<Shared>,
+    AdminAuth(actor): AdminAuth,
+    Json(req): Json<CreateInviteReq>,
+) -> ApiResult<Json<InviteRes>> {
+    let label = req.label.trim().to_string();
+    if label.chars().count() > 64 {
+        return Err(ApiError::BadRequest("that label is too long".into()));
+    }
+
+    let hours = req.expires_in_hours.unwrap_or(DEFAULT_INVITE_HOURS);
+    if hours > MAX_INVITE_HOURS {
+        return Err(ApiError::BadRequest(
+            "an invite can last at most a year".into(),
+        ));
+    }
+    let now = now_ms();
+    // Zero is the caller explicitly asking for a link that never expires.
+    let expires_at = (hours > 0).then(|| now + hours * 60 * 60 * 1000);
+    let max_uses = req.max_uses.unwrap_or(1);
+
+    let token = auth::new_session_token();
+    let (id, hash, by) = (st.next_id(), token.hash, actor.id);
+    let created = st
+        .db(move |s| {
+            s.create_invite(tc_store::NewInvite {
+                id,
+                token_hash: &hash,
+                label: &label,
+                created_by: by,
+                created_at: now,
+                expires_at,
+                max_uses,
+            })
+        })
+        .await?;
+
+    Ok(Json(invite_res(created, Some(token.secret), now)))
+}
+
+async fn list_invites(
+    State(st): State<Shared>,
+    AdminAuth(_): AdminAuth,
+) -> ApiResult<Json<Vec<InviteRes>>> {
+    let now = now_ms();
+    let invites = st.db(|s| s.invites()).await?;
+    Ok(Json(
+        invites
+            .into_iter()
+            .map(|i| invite_res(i, None, now))
+            .collect(),
+    ))
+}
+
+async fn revoke_invite(
+    State(st): State<Shared>,
+    AdminAuth(_): AdminAuth,
+    Path(id): Path<Id>,
+) -> ApiResult<StatusCode> {
+    st.db(move |s| s.delete_invite(id)).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Serialize)]
+pub struct InviteCheckRes {
+    valid: bool,
+}
+
+/// Whether an invite link is still good, for the sign-up screen.
+///
+/// Unauthenticated by necessity — the whole point is that the caller has no
+/// account yet. It reveals only whether a 256-bit token the caller already holds
+/// is live, which is not something they could not learn by simply trying to
+/// register. Rate-limited anyway, so it cannot be used to scan.
+async fn check_invite(
+    State(st): State<Shared>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Path(token): Path<String>,
+) -> ApiResult<Json<InviteCheckRes>> {
+    if !st.login_limiter.allow(peer.ip()) {
+        return Err(ApiError::RateLimited);
+    }
+    let hash = auth::token_hash(&token);
+    let now = now_ms();
+    let valid = st.db(move |s| s.invite_is_live(&hash, now)).await?;
+    Ok(Json(InviteCheckRes { valid }))
 }
 
 #[derive(Deserialize)]

@@ -88,6 +88,21 @@ export type ApiToken = {
   secret?: string;
 };
 
+export type Invite = {
+  id: Id;
+  label: string;
+  created_at: number;
+  /** Null never expires. */
+  expires_at?: number | null;
+  /** Zero is unlimited. */
+  max_uses: number;
+  uses: number;
+  /** Whether it would still be accepted. Computed server-side. */
+  live: boolean;
+  /** Only present in the response that created it. */
+  token?: string;
+};
+
 /**
  * Sentinels wrapping matched terms in a search snippet.
  *

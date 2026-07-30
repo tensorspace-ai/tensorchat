@@ -1,4 +1,4 @@
--- TensorChat schema (version 6).
+-- TensorChat schema (version 7).
 --
 -- Conventions:
 --   * Every `id` is a Snowflake (see tc-core::id). Because they are monotonic,
@@ -60,6 +60,30 @@ CREATE TABLE api_tokens (
 
 CREATE UNIQUE INDEX api_tokens_id ON api_tokens (id);
 CREATE INDEX api_tokens_by_user ON api_tokens (user_id);
+
+-- Invite links. The middle setting between "anyone with the URL can register"
+-- and "nobody can, provision accounts by hand": registration stays closed, and
+-- an administrator admits exactly the people they meant to.
+--
+-- Only a SHA-256 of the token is stored, like sessions and API tokens. The link
+-- is shown once and is unrecoverable afterwards.
+CREATE TABLE invites (
+    token_hash BLOB    PRIMARY KEY,
+    -- Snowflake, so an invite can be revoked by URL without exposing the digest
+    -- of a link that is still live.
+    id         INTEGER NOT NULL,
+    label      TEXT    NOT NULL DEFAULT '',
+    created_by INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    -- NULL never expires.
+    expires_at INTEGER,
+    -- 0 is unlimited. Anything else is enforced inside the same transaction
+    -- that creates the account, so the last seat cannot be taken twice.
+    max_uses   INTEGER NOT NULL DEFAULT 0,
+    uses       INTEGER NOT NULL DEFAULT 0
+) STRICT, WITHOUT ROWID;
+
+CREATE UNIQUE INDEX invites_id ON invites (id);
 
 CREATE TABLE channels (
     id           INTEGER PRIMARY KEY,

@@ -14,6 +14,7 @@ import type {
   Attachment,
   Channel,
   Id,
+  Invite,
   Message,
   ReadState,
   SearchHit,
@@ -82,11 +83,16 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 type Session = { token: string; user: User };
 
 export const api = {
-  register: (handle: string, displayName: string, password: string) =>
+  /**
+   * Create an account. `invite` admits the account even when open registration
+   * is closed; without one the server refuses unless registration is open.
+   */
+  register: (handle: string, displayName: string, password: string, invite?: string) =>
     request<Session>('POST', '/api/register', {
       handle,
       display_name: displayName,
       password,
+      ...(invite ? { invite } : {}),
     }),
 
   login: (handle: string, password: string) =>
@@ -138,6 +144,27 @@ export const api = {
     request<ApiToken>('POST', `/api/admin/bots/${botId}/tokens`, { label }),
 
   revokeBotToken: (tokenId: Id) => request<void>('DELETE', `/api/admin/tokens/${tokenId}`),
+
+  invites: () => request<Invite[]>('GET', '/api/admin/invites'),
+
+  /**
+   * Mint an invite link. The `token` comes back **only here** — nothing stored
+   * server-side can reconstruct it, so a lost link is reissued, not recovered.
+   *
+   * `expires_in_hours: 0` means never; `max_uses: 0` means unlimited. Omitting
+   * either takes the server's conservative default (a week, single use).
+   */
+  createInvite: (opts: { label?: string; expires_in_hours?: number; max_uses?: number } = {}) =>
+    request<Invite>('POST', '/api/admin/invites', opts),
+
+  revokeInvite: (id: Id) => request<void>('DELETE', `/api/admin/invites/${id}`),
+
+  /**
+   * Whether an invite link is still good. Unauthenticated — the caller has no
+   * account yet, which is the entire point.
+   */
+  checkInvite: (token: string) =>
+    request<{ valid: boolean }>('GET', `/api/invites/${encodeURIComponent(token)}`),
 
   channels: () => request<Channel[]>('GET', '/api/channels'),
 

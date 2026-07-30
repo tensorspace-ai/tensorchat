@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Invite links** — administrators mint links from Preferences → Invite
+  people, or `POST /api/admin/invites`. A link may be single-use or multi-use,
+  expiring or permanent, and is revocable. `/api/register` accepts an `invite`
+  field that admits an account even when `TC_OPEN_REGISTRATION` is false,
+  closing the gap where a closed workspace had no way at all to add its second
+  person. Recipients open `#/join/{token}`, which pre-checks the link and opens
+  the sign-up form. Only a SHA-256 of the token is stored, and the seat is
+  claimed inside the same transaction that creates the account, so a single-use
+  link cannot admit two people who race each other.
 - **Bots and API tokens** — administrators create bot accounts and mint
   long-lived tokens for them. A token authenticates the whole HTTP API as a
   bearer credential, and `POST /api/hooks/{token}` posts for senders that

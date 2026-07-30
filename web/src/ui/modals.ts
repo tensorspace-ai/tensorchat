@@ -9,7 +9,7 @@
 
 import { el, replace } from '../dom.ts';
 import { ApiError, api } from '../api.ts';
-import type { Channel, Id, User } from '../protocol.ts';
+import type { Channel, Id, Invite, User } from '../protocol.ts';
 import type { Notifier } from '../notify.ts';
 import type { Store } from '../store.ts';
 import { avatar } from './sidebar.ts';
@@ -551,6 +551,183 @@ export function manageBotsDialog(store: Store): void {
   handle.focus();
 }
 
+/**
+ * Describe an invite's remaining life in the terms an administrator thinks in.
+ *
+ * Exported for tests: the interesting cases are the boundaries (spent, expired,
+ * unlimited), and they are easier to pin down here than through the DOM.
+ */
+export function describeInvite(inv: Invite, now: number): string {
+  if (!inv.live) {
+    // Say *why* it is dead. "Expired" and "all used up" call for different
+    // fixes: one needs a longer link, the other needs a bigger one.
+    if (inv.expires_at != null && inv.expires_at <= now) return 'expired';
+    return inv.max_uses === 1 ? 'used' : `all ${inv.max_uses} uses taken`;
+  }
+
+  const uses = inv.max_uses === 0 ? `${inv.uses} joined` : `${inv.uses}/${inv.max_uses} used`;
+  if (inv.expires_at == null) return `${uses} · never expires`;
+
+  const hours = Math.max(0, Math.round((inv.expires_at - now) / 3_600_000));
+  const left = hours >= 48 ? `${Math.round(hours / 24)}d left` : `${hours}h left`;
+  return `${uses} · ${left}`;
+}
+
+export function manageInvitesDialog(): void {
+  const list = el('div', { class: 'modal-list' });
+  const error = errorLine();
+
+  const label = el('input', {
+    class: 'modal-input',
+    placeholder: 'What is this link for? (optional)',
+    'aria-label': 'Invite label',
+  }) as HTMLInputElement;
+
+  const uses = el('select', { class: 'modal-input', 'aria-label': 'How many people' }) as
+    HTMLSelectElement;
+  for (const [value, text] of [
+    ['1', 'One person'],
+    ['5', 'Up to 5 people'],
+    ['25', 'Up to 25 people'],
+    ['0', 'No limit'],
+  ] as const) {
+    uses.appendChild(el('option', { value, text }));
+  }
+
+  const expiry = el('select', { class: 'modal-input', 'aria-label': 'How long' }) as
+    HTMLSelectElement;
+  for (const [value, text] of [
+    ['24', 'Expires in a day'],
+    ['168', 'Expires in a week'],
+    ['720', 'Expires in 30 days'],
+    ['0', 'Never expires'],
+  ] as const) {
+    expiry.appendChild(el('option', { value, text }));
+  }
+  expiry.value = '168';
+
+  const create = el('button', {
+    class: 'modal-submit',
+    text: 'Create invite link',
+  }) as HTMLButtonElement;
+
+  dialog(
+    'Invite people',
+    el('p', {
+      class: 'modal-hint',
+      text: 'An invite link lets someone create an account even when registration is closed. It grants nothing else — they arrive as an ordinary member.',
+    }),
+    label,
+    el('div', { class: 'modal-row' }, uses, expiry),
+    create,
+    error,
+    list,
+  );
+
+  /**
+   * Show a freshly minted link. It is the one and only time the token exists
+   * outside the recipient's hands, so it is presented for copying rather than
+   * buried in the list below.
+   */
+  const showLink = (token: string) => {
+    const url = `${location.origin}${location.pathname}#/join/${token}`;
+    const box = el('input', {
+      class: 'modal-input secret-box',
+      value: url,
+      readonly: true,
+      'aria-label': 'Invite link',
+    }) as HTMLInputElement;
+    const copy = el('button', {
+      class: 'manage-action',
+      text: 'Copy',
+      on: {
+        click: async () => {
+          try {
+            await navigator.clipboard.writeText(url);
+            copy.textContent = 'Copied';
+          } catch {
+            // Clipboard access needs a secure origin; selecting the text is
+            // the fallback that works everywhere.
+            box.focus();
+            box.select();
+          }
+        },
+      },
+    });
+    list.prepend(
+      el(
+        'div',
+        { class: 'modal-note' },
+        el('div', { text: 'Copy this now — it will not be shown again.' }),
+        el('div', { class: 'modal-row' }, box, copy),
+      ),
+    );
+    box.focus();
+    box.select();
+  };
+
+  const render = async () => {
+    try {
+      const invites = await api.invites();
+      const now = Date.now();
+      replace(
+        list,
+        invites.length === 0
+          ? [el('div', { class: 'empty', text: 'No invite links yet.' })]
+          : invites.map((inv) =>
+              el(
+                'div',
+                { class: `token-row${inv.live ? '' : ' is-dead'}` },
+                el('span', {
+                  class: 'token-label',
+                  text: inv.label || 'Invite link',
+                }),
+                el('span', { class: 'token-used', text: describeInvite(inv, now) }),
+                el('button', {
+                  class: 'manage-action danger',
+                  text: inv.live ? 'Revoke' : 'Remove',
+                  on: {
+                    click: async () => {
+                      try {
+                        await api.revokeInvite(inv.id);
+                        await render();
+                      } catch (err) {
+                        showError(error, err);
+                      }
+                    },
+                  },
+                }),
+              ),
+            ),
+      );
+    } catch (err) {
+      showError(error, err);
+    }
+  };
+
+  create.addEventListener('click', async () => {
+    create.disabled = true;
+    error.hidden = true;
+    try {
+      const inv = await api.createInvite({
+        label: label.value.trim(),
+        max_uses: Number(uses.value),
+        expires_in_hours: Number(expiry.value),
+      });
+      label.value = '';
+      await render();
+      if (inv.token) showLink(inv.token);
+    } catch (err) {
+      showError(error, err);
+    } finally {
+      create.disabled = false;
+    }
+  });
+
+  void render();
+  label.focus();
+}
+
 export function preferencesDialog(
   store: Store,
   notifier: Notifier,
@@ -642,6 +819,18 @@ export function preferencesDialog(
             click: () => {
               d.close();
               manageUsersDialog(store);
+            },
+          },
+        })
+      : null,
+    me.adm
+      ? el('button', {
+          class: 'modal-secondary',
+          text: 'Invite people',
+          on: {
+            click: () => {
+              d.close();
+              manageInvitesDialog();
             },
           },
         })

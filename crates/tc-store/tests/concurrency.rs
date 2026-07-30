@@ -304,3 +304,63 @@ fn concurrent_dm_creation_yields_one_conversation() {
     all.dedup();
     assert_eq!(all.len(), 1, "a DM must never be duplicated, got {all:?}");
 }
+
+/// A single-use invite must admit exactly one account no matter how many people
+/// redeem it at once.
+///
+/// This is the reason `create_user_via_invite` claims the seat with a
+/// conditional `UPDATE` inside the same transaction as the account insert. The
+/// obvious implementation — read `uses`, compare against `max_uses`, then insert
+/// — passes every single-threaded test and over-subscribes the link the moment
+/// two people click it together.
+#[test]
+fn a_single_use_invite_admits_exactly_one_racing_account() {
+    let fx = fixture(1);
+    let seats = 1;
+    let contenders = 8;
+
+    fx.store
+        .create_invite(tc_store::NewInvite {
+            id: fx.ids.next(),
+            token_hash: b"race",
+            label: "",
+            created_by: fx.users[0],
+            created_at: 1,
+            expires_at: None,
+            max_uses: seats,
+        })
+        .expect("create invite");
+
+    let admitted = Arc::new(AtomicUsize::new(0));
+    let mut handles = Vec::new();
+    for i in 0..contenders {
+        let store = fx.store.clone();
+        let ids = fx.ids.clone();
+        let admitted = admitted.clone();
+        handles.push(std::thread::spawn(move || {
+            let handle = format!("newcomer{i}");
+            match store.create_user_via_invite(ids.next(), &handle, &handle, "hash", b"race", 2) {
+                Ok(_) => {
+                    admitted.fetch_add(1, Ordering::Relaxed);
+                }
+                // Forbidden is the expected loss: the seat was already taken.
+                Err(tc_store::Error::Forbidden) => {}
+                Err(e) => panic!("unexpected error redeeming an invite: {e}"),
+            }
+        }));
+    }
+    for h in handles {
+        h.join().expect("worker panicked");
+    }
+
+    assert_eq!(
+        admitted.load(Ordering::Relaxed),
+        seats as usize,
+        "a {seats}-seat invite admitted the wrong number of accounts"
+    );
+    // And the counter agrees with reality, rather than having been incremented
+    // by losers whose inserts rolled back.
+    let invite = &fx.store.invites().expect("list invites")[0];
+    assert_eq!(invite.uses, seats);
+    assert!(!invite.is_live(2), "the link is spent");
+}

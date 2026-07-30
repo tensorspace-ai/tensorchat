@@ -38,6 +38,12 @@ hits and permalinks jump into the surrounding history rather than dead-ending.
 others or deactivate accounts. Deactivation signs the account out everywhere and
 blocks sign-in while leaving its messages, mentions and threads intact.
 
+**Invites** — with registration closed, administrators hand out invite links
+that admit exactly the people they meant to. A link can be single-use or
+multi-use, expiring or permanent, and is revocable at any time. The seat is
+claimed in the same transaction that creates the account, so a single-use link
+cannot admit two people who click it at once.
+
 **Integrations** — bot accounts with long-lived API tokens. A token works as a
 bearer credential on the whole HTTP API, and `POST /api/hooks/{token}` accepts
 `{"channel": "...", "text": "..."}` for senders that cannot set headers. A bot
@@ -131,11 +137,29 @@ All configuration is environment variables. Everything has a working default.
 | `TC_WEB` | `web/dist` | Built frontend to serve. |
 | `TC_NODE_ID` | `0` | Distinguishes ID generators if several instances share a database. |
 | `TC_MAX_UPLOAD` | `26214400` | Maximum upload size in bytes. |
-| `TC_OPEN_REGISTRATION` | `true` | Set `false` to close signups. |
+| `TC_OPEN_REGISTRATION` | `true` | Set `false` to close signups. Invite links still work — see below. |
 | `TC_AUTH_BURST` | `10` | Login/register attempts allowed per client address before throttling. |
 | `TC_AUTH_PER_SECOND` | `0.5` | Refill rate for that allowance. Raise both behind a proxy that hides client addresses. |
 | `TC_PERMISSIVE_CORS` | `false` | Development only. |
 | `RUST_LOG` | `tc_server=info` | Log filter. |
+
+### Closing registration
+
+`TC_OPEN_REGISTRATION=false` shuts the public sign-up form. Invite links still
+work, so this is the setting most deployments want — but claim the
+administrator account *before* you close it, because an empty closed workspace
+has nobody who can mint the first invite:
+
+```sh
+# 1. Start open, register yourself at http://127.0.0.1:8080 (you become admin).
+# 2. Restart with registration closed:
+TC_OPEN_REGISTRATION=false cargo run --release -p tc-server
+# 3. Preferences → Invite people → Create invite link.
+```
+
+An invite grants nothing but the right to create an account; the account it
+makes is an ordinary member. Links are stored as a SHA-256 digest and shown
+exactly once, so a lost link is reissued rather than recovered.
 
 ### Development
 
