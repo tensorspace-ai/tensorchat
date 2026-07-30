@@ -12,6 +12,8 @@ nothing and a large one degrades gracefully: a single binary, a single SQLite
 file, ~52 kB of JavaScript, and a realtime path that does one serialization per
 event rather than one per recipient.
 
+![A TensorChat channel](docs/screenshots/channel.png)
+
 ---
 
 ## Features
@@ -31,6 +33,31 @@ channels you belong to.
 **Client** — virtual-scrolled history that stays smooth over a hundred thousand
 messages, optimistic sending, per-channel drafts, mention autocomplete, drag-drop
 and paste-to-upload, a light and dark theme, and keyboard navigation.
+
+---
+
+## Screenshots
+
+**Threads.** Replies live in a side pane, so a deep tangent never buries the
+channel. The channel keeps a reply count and the hover bar offers quick
+reactions.
+
+![Thread pane open beside a channel](docs/screenshots/thread.png)
+
+**Search.** Full-text search over every channel you belong to, with the match
+highlighted in the snippet. `⌘K` from anywhere.
+
+![Search results with highlighted matches](docs/screenshots/search.png)
+
+**Light theme.** Follows the system preference. Also visible here: `@here`,
+inline code, quotes, and consecutive messages from one author collapsing into a
+single block.
+
+![The incidents channel in the light theme](docs/screenshots/light.png)
+
+**Direct messages.** One-to-one and group, in the same sidebar as channels.
+
+![A direct message conversation](docs/screenshots/dm.png)
 
 ---
 
