@@ -51,11 +51,10 @@ can only reach the channels it has been added to, so a leaked hook URL is
 contained by membership like anything else.
 
 **Client** — virtual-scrolled history that stays smooth over a hundred thousand
-messages, optimistic sending, per-channel drafts that survive a reload, mention
-autocomplete, drag-drop
-and paste-to-upload, opt-in desktop notifications, a light and dark theme with a
-System/Light/Dark toggle, and
-keyboard navigation.
+messages, optimistic sending, per-channel drafts that survive a reload, inline
+message editing, mention autocomplete, drag-drop and paste-to-upload, opt-in
+desktop notifications, a System/Light/Dark theme toggle, and keyboard
+navigation.
 
 ---
 
@@ -72,7 +71,8 @@ highlighted in the snippet. `⌘K` from anywhere.
 
 ![Search results with highlighted matches](docs/screenshots/search.png)
 
-**Light theme.** Follows the system preference. Also visible here: `@here`,
+**Light theme.** Follows the system preference by default, or pick one
+explicitly in Preferences. Also visible here: `@here`,
 inline code, quotes, and consecutive messages from one author collapsing into a
 single block.
 
