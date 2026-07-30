@@ -112,9 +112,30 @@ export function SearchOverlay(
   const input = el('input', {
     class: 'search-input',
     type: 'search',
-    placeholder: 'Search messages…',
+    placeholder: 'Search messages, or try from: in: has:',
     'aria-label': 'Search messages',
   }) as HTMLInputElement;
+
+  /** Shown on an empty box: the operators are useless if nobody knows them. */
+  const hint = el(
+    'div',
+    { class: 'search-hint' },
+    ...(
+      [
+        ['from:alice', 'by one person'],
+        ['in:general', 'in one channel'],
+        ['has:link', 'has:file, has:image'],
+        ['before:2026-01-15', 'after: too'],
+      ] as const
+    ).map(([op, what]) =>
+      el(
+        'div',
+        { class: 'search-hint-row' },
+        el('code', { class: 'search-hint-op', text: op }),
+        el('span', { text: what }),
+      ),
+    ),
+  );
 
   const root = el(
     'div',
@@ -133,6 +154,7 @@ export function SearchOverlay(
           icon(ICONS.close, 16),
         ),
       ),
+      hint,
       results,
     ),
     // `open` is attached just below; the cast names the shape callers get.
@@ -144,11 +166,13 @@ export function SearchOverlay(
   function close(): void {
     root.hidden = true;
     input.value = '';
+    hint.hidden = false;
     replace(results, []);
   }
 
   root.open = () => {
     root.hidden = false;
+    hint.hidden = input.value.length > 0;
     input.focus();
     input.select();
   };
@@ -158,6 +182,7 @@ export function SearchOverlay(
     // letter, and the user is still typing anyway.
     if (debounce !== undefined) clearTimeout(debounce);
     const q = input.value.trim();
+    hint.hidden = q.length > 0;
     if (q.length < 2) {
       replace(results, []);
       return;
@@ -199,7 +224,9 @@ export function SearchOverlay(
         const channel = store.channels().get(hit.m.ch);
         const date = idToDate(hit.m.id);
         const body = el('div', { class: 'result-snippet' });
-        body.appendChild(renderSnippet(hit.sn));
+        // A filters-only search (`from:alice`) matched no terms, so there is no
+        // snippet to highlight — show the body itself rather than a blank row.
+        body.appendChild(hit.sn ? renderSnippet(hit.sn) : renderSnippet(hit.m.b));
         return el(
           'button',
           {

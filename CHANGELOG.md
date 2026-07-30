@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Search operators** — `from:`, `in:`, `before:`, `after:` and `has:link` /
+  `has:file` / `has:image`, parsed out of the query in `tc_core::query`. Date
+  bounds become id bounds, since ids are time-sortable, so they need no
+  timestamp column and no second index. A query of operators alone is a valid
+  search answered newest-first. An unrecognized `key:value` stays free text, so
+  a typo searches rather than silently widening the query, and an operator that
+  names something nonexistent returns nothing rather than being dropped.
 - **Theme toggle** — System / Light / Dark in Preferences, replacing a light
   theme that could only follow `prefers-color-scheme`. "System" remains the
   default and keeps tracking the OS live. The light palette moved from a media

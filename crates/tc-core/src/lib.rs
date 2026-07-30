@@ -16,6 +16,7 @@
 pub mod id;
 pub mod model;
 pub mod proto;
+pub mod query;
 pub mod text;
 
 pub use id::{Id, IdGen};

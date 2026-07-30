@@ -31,8 +31,11 @@ resynchronization.
 
 **Reading** — unread and mention badges, a per-channel read cursor synchronized
 across devices, pinned and saved messages, per-channel mute, and full-text
-search with highlighted snippets, scoped to the channels you belong to. Search
-hits and permalinks jump into the surrounding history rather than dead-ending.
+search with highlighted snippets, scoped to the channels you belong to. Queries
+take `from:`, `in:`, `before:`, `after:` and `has:link` / `has:file` /
+`has:image` operators, which also work on their own — `from:alice in:general` is
+a valid search. Search hits and permalinks jump into the surrounding history
+rather than dead-ending.
 
 **Administration** — the first account is an administrator, and can promote
 others or deactivate accounts. Deactivation signs the account out everywhere and
@@ -72,9 +75,8 @@ highlighted in the snippet. `⌘K` from anywhere.
 ![Search results with highlighted matches](docs/screenshots/search.png)
 
 **Light theme.** Follows the system preference by default, or pick one
-explicitly in Preferences. Also visible here: `@here`,
-inline code, quotes, and consecutive messages from one author collapsing into a
-single block.
+explicitly in Preferences. Also visible here: `@here`, inline code, quotes, and
+consecutive messages from one author collapsing into a single block.
 
 ![The incidents channel in the light theme](docs/screenshots/light.png)
 

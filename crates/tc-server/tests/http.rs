@@ -2409,3 +2409,251 @@ async fn a_taken_handle_does_not_burn_an_invite_seat() {
     let (status, body) = register_with_invite(&app, "bob", &token, "10.5.0.2:1").await;
     assert_eq!(status, StatusCode::OK, "the seat survived: {body}");
 }
+
+// ---------------------------------------------------------------- search operators
+
+/// A channel containing one message from each of two people, plus a link.
+async fn searchable_workspace() -> (App, String, String, String) {
+    let app = App::new();
+    let (alice, alice_id) = app.account("alice").await;
+    let (bob, bob_id) = app.account("bob").await;
+
+    let (_, chan) = app
+        .send(
+            "POST",
+            "/api/channels",
+            Some(&alice),
+            Some(json!({ "name": "general", "private": false, "members": [bob_id] })),
+        )
+        .await;
+    let ch = chan["id"].as_str().unwrap().to_string();
+
+    for (who, body) in [
+        (&alice, "the release runbook is at https://example.com/run"),
+        (&alice, "the release is cut"),
+        (&bob, "the release looks good to me"),
+    ] {
+        let (status, _) = app
+            .send(
+                "POST",
+                &format!("/api/channels/{ch}/messages"),
+                Some(who),
+                Some(json!({ "body": body })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    let _ = alice_id;
+    (app, alice, bob_id, ch)
+}
+
+/// Run a search and return the matched bodies.
+async fn search_bodies(app: &App, token: &str, q: &str) -> Vec<String> {
+    let (status, hits) = app
+        .send(
+            "GET",
+            &format!("/api/search?q={}", urlencode(q)),
+            Some(token),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "search {q:?} failed: {hits}");
+    hits.as_array()
+        .unwrap()
+        .iter()
+        .map(|h| h["m"]["b"].as_str().unwrap_or_default().to_string())
+        .collect()
+}
+
+/// Percent-encode a query string value. Written out rather than pulled in as a
+/// dependency: this is the only place a test needs it.
+fn urlencode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            b' ' => out.push_str("%20"),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+#[tokio::test]
+async fn search_narrows_by_author_with_from() {
+    let (app, alice, _, _) = searchable_workspace().await;
+
+    assert_eq!(search_bodies(&app, &alice, "release").await.len(), 3);
+
+    let mine = search_bodies(&app, &alice, "release from:alice").await;
+    assert_eq!(mine.len(), 2, "got {mine:?}");
+    assert!(mine.iter().all(|b| !b.contains("good to me")));
+
+    // The sigil is optional, and the operator is not searched for as text.
+    assert_eq!(
+        search_bodies(&app, &alice, "release from:@alice")
+            .await
+            .len(),
+        2
+    );
+}
+
+#[tokio::test]
+async fn search_narrows_by_channel_with_in() {
+    let (app, alice, _, _) = searchable_workspace().await;
+    let (_, other) = app
+        .send(
+            "POST",
+            "/api/channels",
+            Some(&alice),
+            Some(json!({ "name": "random", "private": false })),
+        )
+        .await;
+    let other_id = other["id"].as_str().unwrap();
+    app.send(
+        "POST",
+        &format!("/api/channels/{other_id}/messages"),
+        Some(&alice),
+        Some(json!({ "body": "a release elsewhere" })),
+    )
+    .await;
+
+    assert_eq!(search_bodies(&app, &alice, "release").await.len(), 4);
+    assert_eq!(
+        search_bodies(&app, &alice, "release in:random").await,
+        vec!["a release elsewhere"]
+    );
+    assert_eq!(
+        search_bodies(&app, &alice, "release in:#general")
+            .await
+            .len(),
+        3,
+        "the # is optional"
+    );
+}
+
+#[tokio::test]
+async fn search_narrows_by_content_with_has() {
+    let (app, alice, _, _) = searchable_workspace().await;
+    let linked = search_bodies(&app, &alice, "release has:link").await;
+    assert_eq!(linked.len(), 1, "got {linked:?}");
+    assert!(linked[0].contains("https://example.com/run"));
+
+    // Nothing here carries an attachment.
+    assert!(
+        search_bodies(&app, &alice, "release has:file")
+            .await
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn search_narrows_by_date() {
+    let (app, alice, _, _) = searchable_workspace().await;
+    // Everything was posted just now, so a bound in the past excludes it all
+    // and one in the future includes it all.
+    assert!(
+        search_bodies(&app, &alice, "release before:2020-01-01")
+            .await
+            .is_empty()
+    );
+    assert_eq!(
+        search_bodies(&app, &alice, "release after:2020-01-01")
+            .await
+            .len(),
+        3
+    );
+}
+
+#[tokio::test]
+async fn operators_alone_are_a_valid_search() {
+    // "everything alice said" — no search terms at all.
+    let (app, alice, _, _) = searchable_workspace().await;
+    let mine = search_bodies(&app, &alice, "from:alice").await;
+    assert_eq!(mine.len(), 2, "got {mine:?}");
+    // Newest first, since there is nothing to rank by.
+    assert_eq!(mine[0], "the release is cut");
+
+    // But a genuinely empty query still returns nothing rather than everything.
+    assert!(search_bodies(&app, &alice, "").await.is_empty());
+    assert!(search_bodies(&app, &alice, "   ").await.is_empty());
+}
+
+#[tokio::test]
+async fn an_operator_naming_nothing_returns_nothing() {
+    // Not "ignore the filter and return everything", which is the dangerous
+    // failure mode: a typo would silently widen the search.
+    let (app, alice, _, _) = searchable_workspace().await;
+    assert!(
+        search_bodies(&app, &alice, "release from:nobody")
+            .await
+            .is_empty()
+    );
+    assert!(
+        search_bodies(&app, &alice, "release in:nosuchchannel")
+            .await
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn an_unknown_operator_is_searched_for_as_text() {
+    let (app, alice, _, _) = searchable_workspace().await;
+    // `form:` is a typo for `from:`; it must not act as a filter, and it must
+    // not error. Nothing contains those words, so nothing matches.
+    assert!(search_bodies(&app, &alice, "form:alice").await.is_empty());
+    // And a URL in the query is not mistaken for an operator.
+    let hits = search_bodies(&app, &alice, "https://example.com/run").await;
+    assert_eq!(hits.len(), 1, "got {hits:?}");
+}
+
+#[tokio::test]
+async fn in_cannot_reach_a_channel_you_are_not_in() {
+    // Resolving the name is not authorization; the membership join is. Naming a
+    // private channel must not reveal anything in it.
+    let app = App::new();
+    let (alice, _) = app.account("alice").await;
+    let (bob, _) = app.account("bob").await;
+    let (_, secret) = app
+        .send(
+            "POST",
+            "/api/channels",
+            Some(&bob),
+            Some(json!({ "name": "secret", "private": true })),
+        )
+        .await;
+    let ch = secret["id"].as_str().unwrap();
+    app.send(
+        "POST",
+        &format!("/api/channels/{ch}/messages"),
+        Some(&bob),
+        Some(json!({ "body": "the confidential release plan" })),
+    )
+    .await;
+
+    assert!(
+        search_bodies(&app, &alice, "release in:secret")
+            .await
+            .is_empty(),
+        "membership gates the operator path too"
+    );
+    assert!(
+        search_bodies(&app, &alice, "in:secret").await.is_empty(),
+        "and the filters-only path as well"
+    );
+    // Bob, who is a member, still finds it.
+    assert_eq!(
+        search_bodies(&app, &bob, "release in:secret").await.len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn operators_compose() {
+    let (app, alice, _, _) = searchable_workspace().await;
+    let hits = search_bodies(&app, &alice, "release from:alice in:general has:link").await;
+    assert_eq!(hits.len(), 1, "got {hits:?}");
+    assert!(hits[0].contains("runbook"));
+}

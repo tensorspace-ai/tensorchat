@@ -16,15 +16,55 @@ use crate::{Result, Store, from_sql, to_sql, unpack_ids};
 pub const MAX_RESULTS: u32 = 50;
 
 /// A parsed search request.
+///
+/// The `from:` / `in:` / `before:` / `after:` / `has:` operators a user types
+/// are parsed by `tc_core::query` and resolved to ids by the server; by the
+/// time a request reaches here every filter is already a concrete value.
+#[derive(Default)]
 pub struct SearchQuery<'a> {
-    /// Raw user input. Sanitized into an FTS5 expression by [`to_fts_query`].
+    /// Free text, operators already removed. Sanitized into an FTS5 expression
+    /// by [`to_fts_query`]. May be empty when the request is filters-only.
     pub text: &'a str,
     /// Restrict to one channel.
     pub channel: Option<Id>,
     /// Restrict to one author.
     pub author: Option<Id>,
+    /// Exclusive upper bound on message id, from `before:`.
+    pub before: Option<Id>,
+    /// Inclusive lower bound on message id, from `after:`.
+    pub after: Option<Id>,
+    /// Only messages whose body contains a URL.
+    pub has_link: bool,
+    /// Only messages carrying an attachment.
+    pub has_file: bool,
+    /// Only messages carrying an image attachment.
+    pub has_image: bool,
     pub limit: u32,
 }
+
+impl SearchQuery<'_> {
+    /// Whether anything besides the free text narrows this search.
+    fn has_filters(&self) -> bool {
+        self.channel.is_some()
+            || self.author.is_some()
+            || self.before.is_some()
+            || self.after.is_some()
+            || self.has_link
+            || self.has_file
+            || self.has_image
+    }
+}
+
+/// The filter predicates shared by the text and filters-only queries, so the
+/// two can never disagree about what a `has:` means. Parameters 3..=8.
+const FILTERS: &str = "AND (?3 IS NULL OR m.channel_id = ?3) \
+     AND (?4 IS NULL OR m.author_id = ?4) \
+     AND (?5 IS NULL OR m.id < ?5) \
+     AND (?6 IS NULL OR m.id >= ?6) \
+     AND (?7 = 0 OR (m.body LIKE '%http://%' OR m.body LIKE '%https://%')) \
+     AND (?8 = 0 OR EXISTS (SELECT 1 FROM attachments a WHERE a.message_id = m.id)) \
+     AND (?9 = 0 OR EXISTS (SELECT 1 FROM attachments a \
+                             WHERE a.message_id = m.id AND a.mime LIKE 'image/%'))";
 
 /// Turn user input into a safe FTS5 MATCH expression.
 ///
@@ -90,34 +130,56 @@ fn map_hit(row: &Row<'_>) -> rusqlite::Result<SearchHit> {
 impl Store {
     /// Search messages visible to `viewer`, best match first.
     ///
-    /// Returns an empty result (not an error) for a query with no searchable
-    /// terms, which is what an in-progress keystroke looks like.
+    /// Returns an empty result (not an error) for a query with neither search
+    /// terms nor filters, which is what an in-progress keystroke looks like.
+    ///
+    /// A query with filters but no terms — `from:alice in:general` — is a real
+    /// request for "everything Alice said there" and is answered newest-first
+    /// from the message table, without touching the full-text index at all.
     pub fn search(&self, viewer: Id, q: SearchQuery<'_>) -> Result<Vec<SearchHit>> {
-        let Some(expr) = to_fts_query(q.text) else {
+        let expr = to_fts_query(q.text);
+        if expr.is_none() && !q.has_filters() {
             return Ok(Vec::new());
-        };
+        }
         let limit = q.limit.clamp(1, MAX_RESULTS);
         let conn = self.conn()?;
 
         // The snippet markers are the sentinels from tc_core::model, not HTML:
         // the client escapes the text first and only then converts sentinels to
         // markup, so a message body can never inject tags into its own snippet.
-        let mut stmt = conn.prepare_cached(&format!(
-            "SELECT m.id, m.channel_id, m.author_id, m.body, m.thread_root, m.reply_count, \
-                    m.edited_at, m.deleted, m.mentions, \
-                    snippet(messages_fts, 0, char({hl_start}), char({hl_end}), '…', 14) \
-               FROM messages_fts f \
-               JOIN messages m ON m.id = f.rowid \
-               JOIN members mem ON mem.channel_id = m.channel_id AND mem.user_id = ?1 \
-              WHERE messages_fts MATCH ?2 \
-                AND m.deleted = 0 \
-                AND (?3 IS NULL OR m.channel_id = ?3) \
-                AND (?4 IS NULL OR m.author_id = ?4) \
-              ORDER BY f.rank \
-              LIMIT ?5",
-            hl_start = model::HL_START as u32,
-            hl_end = model::HL_END as u32,
-        ))?;
+        //
+        // Both shapes carry the same membership join and the same filters; they
+        // differ only in whether there is an index to match and rank against.
+        let sql = match &expr {
+            Some(_) => format!(
+                "SELECT m.id, m.channel_id, m.author_id, m.body, m.thread_root, m.reply_count, \
+                        m.edited_at, m.deleted, m.mentions, \
+                        snippet(messages_fts, 0, char({hl_start}), char({hl_end}), '…', 14) \
+                   FROM messages_fts f \
+                   JOIN messages m ON m.id = f.rowid \
+                   JOIN members mem ON mem.channel_id = m.channel_id AND mem.user_id = ?1 \
+                  WHERE messages_fts MATCH ?2 \
+                    AND m.deleted = 0 {FILTERS} \
+                  ORDER BY f.rank \
+                  LIMIT ?10",
+                hl_start = model::HL_START as u32,
+                hl_end = model::HL_END as u32,
+            ),
+            // No text to rank by, so newest first — and no snippet, since there
+            // is no match to highlight. `?2` is bound and unused so that both
+            // statements take the same parameter list.
+            None => format!(
+                "SELECT m.id, m.channel_id, m.author_id, m.body, m.thread_root, m.reply_count, \
+                        m.edited_at, m.deleted, m.mentions, '' \
+                   FROM messages m \
+                   JOIN members mem ON mem.channel_id = m.channel_id AND mem.user_id = ?1 \
+                  WHERE ?2 IS NULL \
+                    AND m.deleted = 0 {FILTERS} \
+                  ORDER BY m.id DESC \
+                  LIMIT ?10"
+            ),
+        };
+        let mut stmt = conn.prepare_cached(&sql)?;
 
         let mut hits: Vec<SearchHit> = stmt
             .query_map(
@@ -126,6 +188,11 @@ impl Store {
                     expr,
                     q.channel.map(to_sql),
                     q.author.map(to_sql),
+                    q.before.map(to_sql),
+                    q.after.map(to_sql),
+                    q.has_link,
+                    q.has_file,
+                    q.has_image,
                     limit as i64
                 ],
                 map_hit,
@@ -214,25 +281,45 @@ mod tests {
         .id
     }
 
+    /// Post a message carrying one attachment of the given type.
+    fn post_with_attachment(f: &Fx, body: &str, name: &str, mime: &str) -> Id {
+        let a =
+            f.s.create_attachment(f.g.next(), f.alice, name, mime, 10, None, "blob/path")
+                .unwrap();
+        f.s.insert_message(NewMessage {
+            id: f.g.next(),
+            channel_id: f.ch,
+            author_id: f.alice,
+            body,
+            thread_root: None,
+            attachments: &[a.id],
+            mentions: &[],
+        })
+        .unwrap()
+        .id
+    }
+
     fn ids(hits: &[SearchHit]) -> Vec<Id> {
         hits.iter().map(|h| h.message.id).collect()
+    }
+
+    /// A search request with the given text and the two long-standing filters.
+    /// Everything added since defaults off, so a test names only what it means.
+    fn q<'a>(text: &'a str, channel: Option<Id>, author: Option<Id>) -> SearchQuery<'a> {
+        SearchQuery {
+            text,
+            channel,
+            author,
+            limit: 10,
+            ..Default::default()
+        }
     }
 
     #[test]
     fn finds_messages_and_highlights_the_match() {
         let f = fx();
         let m = post(&f, f.ch, f.alice, "the deploy pipeline is green");
-        let hits =
-            f.s.search(
-                f.alice,
-                SearchQuery {
-                    text: "deploy",
-                    channel: None,
-                    author: None,
-                    limit: 10,
-                },
-            )
-            .unwrap();
+        let hits = f.s.search(f.alice, q("deploy", None, None)).unwrap();
         assert_eq!(ids(&hits), vec![m]);
         assert!(
             hits[0].snippet.contains(model::HL_START),
@@ -248,31 +335,13 @@ mod tests {
     fn never_returns_messages_from_channels_you_are_not_in() {
         let f = fx();
         post(&f, f.other, f.bob, "the secret deploy key");
-        let hits =
-            f.s.search(
-                f.alice,
-                SearchQuery {
-                    text: "secret deploy",
-                    channel: None,
-                    author: None,
-                    limit: 10,
-                },
-            )
-            .unwrap();
+        let hits = f.s.search(f.alice, q("secret deploy", None, None)).unwrap();
         assert!(hits.is_empty(), "search must not leak private channels");
         // Bob is a member, so he can find it.
         assert_eq!(
-            f.s.search(
-                f.bob,
-                SearchQuery {
-                    text: "secret deploy",
-                    channel: None,
-                    author: None,
-                    limit: 10,
-                }
-            )
-            .unwrap()
-            .len(),
+            f.s.search(f.bob, q("secret deploy", None, None))
+                .unwrap()
+                .len(),
             1
         );
     }
@@ -282,17 +351,7 @@ mod tests {
         let f = fx();
         let both = post(&f, f.ch, f.alice, "green deploy pipeline");
         post(&f, f.ch, f.alice, "green tea");
-        let hits =
-            f.s.search(
-                f.alice,
-                SearchQuery {
-                    text: "green deploy",
-                    channel: None,
-                    author: None,
-                    limit: 10,
-                },
-            )
-            .unwrap();
+        let hits = f.s.search(f.alice, q("green deploy", None, None)).unwrap();
         assert_eq!(ids(&hits), vec![both]);
     }
 
@@ -302,17 +361,9 @@ mod tests {
         let m = post(&f, f.ch, f.alice, "ephemeral secret");
         f.s.delete_message(m, f.alice, false).unwrap();
         assert!(
-            f.s.search(
-                f.alice,
-                SearchQuery {
-                    text: "ephemeral",
-                    channel: None,
-                    author: None,
-                    limit: 10,
-                }
-            )
-            .unwrap()
-            .is_empty()
+            f.s.search(f.alice, q("ephemeral", None, None))
+                .unwrap()
+                .is_empty()
         );
     }
 
@@ -322,32 +373,13 @@ mod tests {
         let m = post(&f, f.ch, f.alice, "orginal typo");
         f.s.edit_message(m, f.alice, "original text", 5).unwrap();
         assert!(
-            f.s.search(
-                f.alice,
-                SearchQuery {
-                    text: "orginal",
-                    channel: None,
-                    author: None,
-                    limit: 10,
-                }
-            )
-            .unwrap()
-            .is_empty(),
+            f.s.search(f.alice, q("orginal", None, None))
+                .unwrap()
+                .is_empty(),
             "stale term must be gone"
         );
         assert_eq!(
-            ids(&f
-                .s
-                .search(
-                    f.alice,
-                    SearchQuery {
-                        text: "original",
-                        channel: None,
-                        author: None,
-                        limit: 10,
-                    }
-                )
-                .unwrap()),
+            ids(&f.s.search(f.alice, q("original", None, None)).unwrap()),
             vec![m]
         );
     }
@@ -357,43 +389,15 @@ mod tests {
         let f = fx();
         let by_alice = post(&f, f.ch, f.alice, "shared word");
         let by_bob = post(&f, f.ch, f.bob, "shared word");
-        let all =
-            f.s.search(
-                f.bob,
-                SearchQuery {
-                    text: "shared",
-                    channel: None,
-                    author: None,
-                    limit: 10,
-                },
-            )
-            .unwrap();
+        let all = f.s.search(f.bob, q("shared", None, None)).unwrap();
         assert_eq!(all.len(), 2);
 
-        let only_bob =
-            f.s.search(
-                f.bob,
-                SearchQuery {
-                    text: "shared",
-                    channel: None,
-                    author: Some(f.bob),
-                    limit: 10,
-                },
-            )
-            .unwrap();
+        let only_bob = f.s.search(f.bob, q("shared", None, Some(f.bob))).unwrap();
         assert_eq!(ids(&only_bob), vec![by_bob]);
 
         let in_ch =
-            f.s.search(
-                f.bob,
-                SearchQuery {
-                    text: "shared",
-                    channel: Some(f.ch),
-                    author: Some(f.alice),
-                    limit: 10,
-                },
-            )
-            .unwrap();
+            f.s.search(f.bob, q("shared", Some(f.ch), Some(f.alice)))
+                .unwrap();
         assert_eq!(ids(&in_ch), vec![by_alice]);
     }
 
@@ -411,15 +415,7 @@ mod tests {
             "col:value",
             "\"\"\"",
         ] {
-            let r = f.s.search(
-                f.alice,
-                SearchQuery {
-                    text: probe,
-                    channel: None,
-                    author: None,
-                    limit: 10,
-                },
-            );
+            let r = f.s.search(f.alice, q(probe, None, None));
             assert!(r.is_ok(), "query {probe:?} should not error, got {r:?}");
         }
     }
@@ -428,17 +424,7 @@ mod tests {
     fn a_literal_quote_in_a_message_is_findable() {
         let f = fx();
         let m = post(&f, f.ch, f.alice, r#"he said "shipit" loudly"#);
-        let hits =
-            f.s.search(
-                f.alice,
-                SearchQuery {
-                    text: r#""shipit""#,
-                    channel: None,
-                    author: None,
-                    limit: 10,
-                },
-            )
-            .unwrap();
+        let hits = f.s.search(f.alice, q(r#""shipit""#, None, None)).unwrap();
         assert_eq!(ids(&hits), vec![m]);
     }
 
@@ -448,17 +434,9 @@ mod tests {
         post(&f, f.ch, f.alice, "hello");
         for probe in ["", "   ", "!!!", "-- ??"] {
             assert!(
-                f.s.search(
-                    f.alice,
-                    SearchQuery {
-                        text: probe,
-                        channel: None,
-                        author: None,
-                        limit: 10,
-                    }
-                )
-                .unwrap()
-                .is_empty()
+                f.s.search(f.alice, q(probe, None, None))
+                    .unwrap()
+                    .is_empty()
             );
         }
     }
@@ -469,18 +447,7 @@ mod tests {
         let m = post(&f, f.ch, f.alice, "Café Réunion");
         for probe in ["cafe", "CAFÉ", "réunion", "reunion"] {
             assert_eq!(
-                ids(&f
-                    .s
-                    .search(
-                        f.alice,
-                        SearchQuery {
-                            text: probe,
-                            channel: None,
-                            author: None,
-                            limit: 10,
-                        }
-                    )
-                    .unwrap()),
+                ids(&f.s.search(f.alice, q(probe, None, None)).unwrap()),
                 vec![m],
                 "probe {probe:?}"
             );
@@ -492,19 +459,229 @@ mod tests {
         let f = fx();
         let m = post(&f, f.ch, f.alice, "reactable content");
         f.s.set_reaction(m, f.bob, "👍", true).unwrap();
+        let hits = f.s.search(f.alice, q("reactable", None, None)).unwrap();
+        assert_eq!(hits[0].message.reactions.len(), 1);
+        assert_eq!(hits[0].message.reactions[0].count, 1);
+    }
+
+    // -- Operators (parsed by tc_core::query, resolved before they get here) --
+
+    #[test]
+    fn a_date_bound_excludes_messages_outside_it() {
+        let f = fx();
+        let old = post(&f, f.ch, f.alice, "shared word");
+        let new = post(&f, f.ch, f.alice, "shared word");
+        // Ids are time-sortable, so a date bound is an id bound. Use the older
+        // message's own id as the cutoff.
+        let cut = new;
+
+        let before =
+            f.s.search(
+                f.alice,
+                SearchQuery {
+                    text: "shared",
+                    before: Some(cut),
+                    limit: 10,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(ids(&before), vec![old], "before is exclusive of the cutoff");
+
+        let after =
+            f.s.search(
+                f.alice,
+                SearchQuery {
+                    text: "shared",
+                    after: Some(cut),
+                    limit: 10,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(ids(&after), vec![new], "after is inclusive of the cutoff");
+    }
+
+    #[test]
+    fn has_link_matches_only_bodies_carrying_a_url() {
+        let f = fx();
+        let with = post(&f, f.ch, f.alice, "the runbook is at https://example.com/x");
+        post(&f, f.ch, f.alice, "the runbook is in the wiki");
+        // A word that merely contains "http" must not count.
+        post(&f, f.ch, f.alice, "the runbook mentions httpd config");
+
         let hits =
             f.s.search(
                 f.alice,
                 SearchQuery {
-                    text: "reactable",
-                    channel: None,
-                    author: None,
+                    text: "runbook",
+                    has_link: true,
                     limit: 10,
+                    ..Default::default()
                 },
             )
             .unwrap();
-        assert_eq!(hits[0].message.reactions.len(), 1);
-        assert_eq!(hits[0].message.reactions[0].count, 1);
+        assert_eq!(ids(&hits), vec![with]);
+    }
+
+    #[test]
+    fn has_file_and_has_image_distinguish_attachment_kinds() {
+        let f = fx();
+        let doc = post_with_attachment(&f, "quarterly summary", "notes.pdf", "application/pdf");
+        let pic = post_with_attachment(&f, "quarterly chart", "chart.png", "image/png");
+        post(&f, f.ch, f.alice, "quarterly notes, no attachment");
+
+        let files =
+            f.s.search(
+                f.alice,
+                SearchQuery {
+                    text: "quarterly",
+                    has_file: true,
+                    limit: 10,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let mut got = ids(&files);
+        got.sort_unstable();
+        let mut want = vec![doc, pic];
+        want.sort_unstable();
+        assert_eq!(got, want, "has:file covers every attachment");
+
+        let images =
+            f.s.search(
+                f.alice,
+                SearchQuery {
+                    text: "quarterly",
+                    has_image: true,
+                    limit: 10,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(ids(&images), vec![pic], "has:image is narrower");
+    }
+
+    #[test]
+    fn filters_without_any_search_terms_still_return_results() {
+        // "everything alice said" is a real request, not an empty query.
+        let f = fx();
+        post(&f, f.ch, f.bob, "from bob");
+        let a1 = post(&f, f.ch, f.alice, "from alice one");
+        let a2 = post(&f, f.ch, f.alice, "from alice two");
+
+        let hits =
+            f.s.search(
+                f.alice,
+                SearchQuery {
+                    text: "",
+                    author: Some(f.alice),
+                    limit: 10,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(ids(&hits), vec![a2, a1], "newest first, with no ranking");
+        assert_eq!(
+            hits[0].snippet, "",
+            "nothing matched, so nothing to highlight"
+        );
+    }
+
+    #[test]
+    fn a_filters_only_query_is_still_scoped_by_membership() {
+        // The filters-only path skips the FTS index entirely, so it needs its
+        // own proof that it did not also skip the authorization join.
+        let f = fx();
+        post(&f, f.other, f.bob, "in the private channel");
+        let hits =
+            f.s.search(
+                f.alice,
+                SearchQuery {
+                    text: "",
+                    author: Some(f.bob),
+                    limit: 10,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(hits.is_empty(), "membership must gate this path too");
+        assert_eq!(
+            f.s.search(
+                f.bob,
+                SearchQuery {
+                    text: "",
+                    author: Some(f.bob),
+                    limit: 10,
+                    ..Default::default()
+                }
+            )
+            .unwrap()
+            .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_filters_only_query_still_omits_deleted_messages() {
+        let f = fx();
+        let m = post(&f, f.ch, f.alice, "regrettable");
+        f.s.delete_message(m, f.alice, false).unwrap();
+        assert!(
+            f.s.search(
+                f.alice,
+                SearchQuery {
+                    text: "",
+                    author: Some(f.alice),
+                    limit: 10,
+                    ..Default::default()
+                }
+            )
+            .unwrap()
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn an_empty_query_with_no_filters_at_all_stays_empty() {
+        // Otherwise an in-progress keystroke would dump the whole workspace.
+        let f = fx();
+        post(&f, f.ch, f.alice, "anything");
+        assert!(
+            f.s.search(
+                f.alice,
+                SearchQuery {
+                    text: "",
+                    limit: 10,
+                    ..Default::default()
+                }
+            )
+            .unwrap()
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn filters_compose_with_each_other_and_with_text() {
+        let f = fx();
+        post(&f, f.ch, f.bob, "release https://example.com/a");
+        let want = post(&f, f.ch, f.alice, "release https://example.com/b");
+        post(&f, f.ch, f.alice, "release with no link");
+
+        let hits =
+            f.s.search(
+                f.alice,
+                SearchQuery {
+                    text: "release",
+                    author: Some(f.alice),
+                    channel: Some(f.ch),
+                    has_link: true,
+                    limit: 10,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(ids(&hits), vec![want]);
     }
 
     #[test]

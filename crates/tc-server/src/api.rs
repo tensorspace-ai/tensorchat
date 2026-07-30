@@ -1078,21 +1078,56 @@ pub struct SearchParams {
     limit: Option<u32>,
 }
 
+/// Full-text search, with `from:` / `in:` / `before:` / `after:` / `has:`
+/// operators parsed out of `q`.
+///
+/// Operators beat the equivalent query parameters when both are present: the
+/// parameters come from UI state the user may have forgotten about, and what
+/// they just typed is the more recent statement of intent.
+///
+/// An operator naming something that does not exist — `from:nobody` — returns
+/// nothing rather than being dropped. Ignoring it would silently widen the
+/// search to every message, which is the opposite of what was asked for.
 async fn search(
     State(st): State<Shared>,
     Auth(u): Auth,
     Query(p): Query<SearchParams>,
 ) -> ApiResult<Json<Vec<SearchHit>>> {
     let uid = u.id;
+    let parsed = tc_core::query::parse(&p.q);
+    let (param_channel, param_author, limit) = (p.channel, p.author, p.limit.unwrap_or(25));
+
     let hits = st
         .db(move |s| {
+            let author = match &parsed.from {
+                Some(handle) => match s.ids_for_handles(std::slice::from_ref(handle))?.first() {
+                    Some((_, id)) => Some(*id),
+                    None => return Ok(Vec::new()),
+                },
+                None => param_author,
+            };
+            let channel = match &parsed.in_channel {
+                Some(name) => match s.channel_id_by_name(name)? {
+                    Some(id) => Some(id),
+                    None => return Ok(Vec::new()),
+                },
+                None => param_channel,
+            };
+
             s.search(
                 uid,
                 SearchQuery {
-                    text: &p.q,
-                    channel: p.channel,
-                    author: p.author,
-                    limit: p.limit.unwrap_or(25),
+                    text: &parsed.text,
+                    channel,
+                    author,
+                    // Ids are time-sortable, so a date bound is an id bound —
+                    // no timestamp column and no second index needed.
+                    before: parsed.before.map(Id::floor_for_ms),
+                    after: parsed.after.map(Id::floor_for_ms),
+                    has_link: parsed.has.link,
+                    has_file: parsed.has.file,
+                    has_image: parsed.has.image,
+                    limit,
                 },
             )
         })

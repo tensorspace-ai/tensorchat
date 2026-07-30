@@ -194,6 +194,21 @@ impl Store {
         }
     }
 
+    /// Resolve a channel name to its id, for the `in:` search operator.
+    ///
+    /// Deliberately not membership-scoped: it only turns a name the caller
+    /// already typed into an id, and every query that consumes one is itself
+    /// joined against `members`. Filtering here as well would make a private
+    /// channel's *existence* detectable by whether the filter was honoured.
+    pub fn channel_id_by_name(&self, name: &str) -> Result<Option<Id>> {
+        let conn = self.conn()?;
+        Ok(conn
+            .prepare_cached("SELECT id FROM channels WHERE name = ?")?
+            .query_row([name], |r| r.get::<_, i64>(0))
+            .optional()?
+            .map(from_sql))
+    }
+
     pub fn channel(&self, id: Id) -> Result<Channel> {
         let conn = self.conn()?;
         let mut c = conn

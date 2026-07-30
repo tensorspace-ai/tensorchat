@@ -2000,6 +2000,28 @@ mark {
   text-align: center;
 }
 
+/* Operator cheatsheet, on an empty box. An operator nobody knows about is an
+   operator nobody uses, and this is the only moment there is room to say so. */
+.search-hint {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 12px;
+  padding: 14px 16px 16px;
+  color: var(--text-muted);
+  font-size: var(--text-md);
+}
+
+.search-hint-row {
+  display: contents;
+}
+
+.search-hint-op {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
 .search-result {
   display: flex;
   align-items: flex-start;
