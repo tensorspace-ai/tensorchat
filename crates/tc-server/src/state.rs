@@ -76,7 +76,7 @@ impl FromRequestParts<Shared> for Auth {
         parts: &mut Parts,
         state: &Shared,
     ) -> Result<Self, Self::Rejection> {
-        let token = bearer_token(parts).ok_or(ApiError::Unauthorized)?;
+        let token = bearer_token(&parts.headers).ok_or(ApiError::Unauthorized)?;
         let hash = crate::auth::token_hash(&token);
         let now = tc_core::now_ms();
 
@@ -95,8 +95,12 @@ impl FromRequestParts<Shared> for Auth {
 /// The cookie form exists for one reason: browsers cannot set headers on a
 /// WebSocket handshake or on a plain `<img src>` for an attachment, so those
 /// two paths need a credential the browser will attach on its own.
-fn bearer_token(parts: &Parts) -> Option<String> {
-    if let Some(v) = parts.headers.get(axum::http::header::AUTHORIZATION)
+///
+/// Takes headers rather than `Parts` so handlers that need to identify *their
+/// own* session — logging out, or sparing the calling device when revoking the
+/// rest — can reuse it instead of re-implementing the fallback chain.
+pub fn bearer_token(headers: &axum::http::HeaderMap) -> Option<String> {
+    if let Some(v) = headers.get(axum::http::header::AUTHORIZATION)
         && let Ok(s) = v.to_str()
         && let Some(rest) = s.strip_prefix("Bearer ")
     {
@@ -105,11 +109,7 @@ fn bearer_token(parts: &Parts) -> Option<String> {
             return Some(t.to_string());
         }
     }
-    let cookies = parts
-        .headers
-        .get(axum::http::header::COOKIE)?
-        .to_str()
-        .ok()?;
+    let cookies = headers.get(axum::http::header::COOKIE)?.to_str().ok()?;
     cookie_value(cookies, "tc_session")
 }
 
@@ -129,13 +129,13 @@ mod tests {
     use super::*;
     use axum::http::{HeaderValue, Request, header};
 
-    fn parts_with(headers: &[(header::HeaderName, &str)]) -> Parts {
+    fn parts_with(headers: &[(header::HeaderName, &str)]) -> axum::http::HeaderMap {
         let mut req = Request::new(());
         for (k, v) in headers {
             req.headers_mut()
                 .insert(k.clone(), HeaderValue::from_str(v).unwrap());
         }
-        req.into_parts().0
+        req.into_parts().0.headers
     }
 
     #[test]

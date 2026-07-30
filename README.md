@@ -219,7 +219,9 @@ until every write path was switched to `IMMEDIATE`.
 Passwords are Argon2id. Sessions are opaque 256-bit random tokens, stored only
 as a SHA-256 digest, so a database dump yields no usable sessions and logout is
 a `DELETE` rather than a blocklist entry. Login answers identically whether an
-account exists or the password was wrong, including in timing.
+account exists or the password was wrong, including in timing. Changing a
+password signs out every other device, because a session is a bearer token that
+would otherwise outlive the password it was issued against.
 
 Channel membership is checked inside the same transaction as every write, and
 search joins against membership rather than filtering afterwards, so a query

@@ -335,6 +335,29 @@ export function preferencesDialog(store: Store, onSaved: (u: User) => void, onLo
   const error = errorLine();
   const submit = el('button', { class: 'modal-submit', text: 'Save' }) as HTMLButtonElement;
 
+  const password = (label: string, autocomplete: string) =>
+    el('input', {
+      class: 'modal-input',
+      type: 'password',
+      placeholder: label,
+      autocomplete,
+      'aria-label': label,
+    }) as HTMLInputElement;
+
+  const currentPassword = password('Current password', 'current-password');
+  const newPassword = password('New password', 'new-password');
+  const confirmPassword = password('Confirm new password', 'new-password');
+  const passwordNote = el('div', { class: 'modal-note', hidden: true, role: 'status' });
+  const passwordError = errorLine();
+  const changePassword = el('button', {
+    class: 'modal-submit',
+    text: 'Change password',
+  }) as HTMLButtonElement;
+  const signOutOthers = el('button', {
+    class: 'modal-secondary',
+    text: 'Sign out other devices',
+  }) as HTMLButtonElement;
+
   const d = dialog(
     'Preferences',
     el('p', { class: 'modal-hint', text: `Signed in as @${me.h}` }),
@@ -342,6 +365,22 @@ export function preferencesDialog(store: Store, onSaved: (u: User) => void, onLo
     status,
     error,
     submit,
+
+    el('hr', { class: 'modal-divider' }),
+    el('h3', { class: 'modal-section', text: 'Password' }),
+    el('p', {
+      class: 'modal-hint',
+      text: 'Changing your password signs out every other device.',
+    }),
+    currentPassword,
+    newPassword,
+    confirmPassword,
+    passwordNote,
+    passwordError,
+    changePassword,
+    signOutOthers,
+
+    el('hr', { class: 'modal-divider' }),
     el('button', {
       class: 'modal-danger',
       text: 'Sign out',
@@ -364,5 +403,53 @@ export function preferencesDialog(store: Store, onSaved: (u: User) => void, onLo
       submit.disabled = false;
     }
   });
+
+  /** Report an outcome in place. The dialog stays open — you may want both. */
+  const note = (text: string) => {
+    passwordNote.textContent = text;
+    passwordNote.hidden = false;
+    passwordError.hidden = true;
+  };
+
+  changePassword.addEventListener('click', async () => {
+    passwordNote.hidden = true;
+    // Checked here as well as on the server, because a typo in the confirmation
+    // is the one failure the server cannot see.
+    if (newPassword.value !== confirmPassword.value) {
+      showError(passwordError, new ApiError(400, 'bad_request', 'The new passwords do not match.'));
+      return;
+    }
+    changePassword.disabled = true;
+    try {
+      const { revoked } = await api.changePassword(currentPassword.value, newPassword.value);
+      currentPassword.value = newPassword.value = confirmPassword.value = '';
+      note(
+        revoked === 0
+          ? 'Password changed.'
+          : `Password changed. ${revoked} other ${revoked === 1 ? 'device' : 'devices'} signed out.`,
+      );
+    } catch (err) {
+      showError(passwordError, err);
+    } finally {
+      changePassword.disabled = false;
+    }
+  });
+
+  signOutOthers.addEventListener('click', async () => {
+    signOutOthers.disabled = true;
+    try {
+      const { revoked } = await api.revokeOtherSessions();
+      note(
+        revoked === 0
+          ? 'No other devices were signed in.'
+          : `${revoked} other ${revoked === 1 ? 'device' : 'devices'} signed out.`,
+      );
+    } catch (err) {
+      showError(passwordError, err);
+    } finally {
+      signOutOthers.disabled = false;
+    }
+  });
+
   displayName.focus();
 }

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Password changes** — `POST /api/me/password`, which re-verifies the current
+  password and then revokes every *other* session, plus
+  `DELETE /api/me/sessions` to do the revocation on its own. Both are exposed in
+  Preferences. There was previously no way to change a password at all.
 - **Channel invitations** — `POST /api/channels/{id}/members` and
   `DELETE /api/channels/{id}/members/{user}`, with an "Add people" control in the
   member pane. Private channels previously had no way in after creation: `join`

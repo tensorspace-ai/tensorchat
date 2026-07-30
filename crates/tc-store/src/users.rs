@@ -98,6 +98,46 @@ impl Store {
         self.user(id)
     }
 
+    /// The stored password hash for one account, for re-authenticating an
+    /// already-signed-in user before a sensitive change.
+    pub fn password_hash(&self, id: Id) -> Result<String> {
+        let conn = self.conn()?;
+        conn.prepare_cached("SELECT password_hash FROM users WHERE id = ?")?
+            .query_row([to_sql(id)], |r| r.get(0))
+            .optional()?
+            .ok_or(Error::NotFound)
+    }
+
+    /// Replace a password hash. The caller has already verified the current
+    /// password; this layer never sees plaintext.
+    pub fn update_password(&self, id: Id, password_hash: &str) -> Result<()> {
+        let conn = self.conn()?;
+        let n = conn
+            .prepare_cached("UPDATE users SET password_hash = ? WHERE id = ?")?
+            .execute(params![password_hash, to_sql(id)])?;
+        if n == 0 {
+            return Err(Error::NotFound);
+        }
+        Ok(())
+    }
+
+    /// Revoke every session belonging to a user, optionally sparing one.
+    ///
+    /// `keep` is the digest of the caller's own token, so changing a password
+    /// signs out every other device without signing out the tab doing the
+    /// changing. Returns how many sessions were revoked.
+    pub fn delete_sessions_for_user(&self, user: Id, keep: Option<&[u8]>) -> Result<usize> {
+        let conn = self.conn()?;
+        // One statement for both cases: a NULL `keep` never equals a token
+        // hash, so the comparison drops out rather than needing a second query.
+        Ok(conn
+            .prepare_cached(
+                "DELETE FROM sessions WHERE user_id = ? \
+                 AND (? IS NULL OR token_hash <> ?)",
+            )?
+            .execute(params![to_sql(user), keep, keep])?)
+    }
+
     /// Record a session. `token_hash` is a SHA-256 of the bearer token; the
     /// token itself is never stored, so a database dump cannot be replayed.
     pub fn create_session(
@@ -262,6 +302,42 @@ mod tests {
             got,
             vec![("alice".to_string(), u.id), ("bob".to_string(), bob.id)]
         );
+    }
+
+    #[test]
+    fn changing_a_password_replaces_the_stored_hash() {
+        let (s, _, u) = store_with_user();
+        assert_eq!(s.password_hash(u.id).unwrap(), "hash");
+        s.update_password(u.id, "new-hash").unwrap();
+        assert_eq!(s.password_hash(u.id).unwrap(), "new-hash");
+        assert_eq!(s.user_for_login("alice").unwrap().unwrap().1, "new-hash");
+    }
+
+    #[test]
+    fn revoking_sessions_can_spare_the_caller_and_never_touches_other_users() {
+        let (s, g, u) = store_with_user();
+        let bob = s.create_user(g.next(), "bob", "Bob", "h").unwrap();
+        for t in [b"tok-a", b"tok-b", b"tok-c"] {
+            s.create_session(t, u.id, 0, u64::MAX / 2).unwrap();
+        }
+        s.create_session(b"bobs-tok", bob.id, 0, u64::MAX / 2)
+            .unwrap();
+
+        assert_eq!(s.delete_sessions_for_user(u.id, Some(b"tok-b")).unwrap(), 2);
+        assert!(
+            s.session_user(b"tok-b", 1).is_ok(),
+            "caller stays signed in"
+        );
+        assert!(s.session_user(b"tok-a", 1).is_err());
+        assert!(s.session_user(b"tok-c", 1).is_err());
+        assert!(
+            s.session_user(b"bobs-tok", 1).is_ok(),
+            "another user's sessions are untouched"
+        );
+
+        // No exemption revokes everything, including the caller's.
+        assert_eq!(s.delete_sessions_for_user(u.id, None).unwrap(), 1);
+        assert!(s.session_user(b"tok-b", 1).is_err());
     }
 
     #[test]

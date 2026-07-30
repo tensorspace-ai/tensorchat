@@ -1912,6 +1912,51 @@ dialog::backdrop {
   background: var(--danger-soft);
 }
 
+.modal-secondary {
+  width: 100%;
+  padding: 9px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  font-size: var(--text-md);
+  font-weight: 600;
+  text-align: center;
+  transition: background var(--speed) var(--ease), color var(--speed) var(--ease);
+}
+
+.modal-secondary:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.modal-secondary:disabled {
+  opacity: 0.45;
+}
+
+.modal-divider {
+  height: 1px;
+  margin: 2px 0;
+  border: 0;
+  background: var(--border);
+}
+
+.modal-section {
+  color: var(--text);
+  font-size: 14.5px;
+  font-weight: 650;
+}
+
+/* Confirmation of something that already happened, as opposed to `.modal-error`
+   which reports something that did not. */
+.modal-note {
+  padding: 8px 11px;
+  border-radius: var(--radius);
+  background: var(--accent-softer);
+  color: var(--text-secondary);
+  font-size: var(--text-md);
+  line-height: 1.4;
+}
+
 .modal-list {
   display: flex;
   flex-direction: column;

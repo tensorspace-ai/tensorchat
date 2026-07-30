@@ -90,6 +90,20 @@ export const api = {
   updateMe: (patch: { display_name?: string; status?: string }) =>
     request<User>('PATCH', '/api/me', patch),
 
+  /**
+   * Change the password. Resolves with how many *other* sessions this signed
+   * out — every device but the one making the call, since a session is a bearer
+   * token that would otherwise outlive the password it was issued against.
+   */
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<{ revoked: number }>('POST', '/api/me/password', {
+      current_password: currentPassword,
+      new_password: newPassword,
+    }),
+
+  /** Sign out every device except this one. */
+  revokeOtherSessions: () => request<{ revoked: number }>('DELETE', '/api/me/sessions'),
+
   users: () => request<User[]>('GET', '/api/users'),
 
   channels: () => request<Channel[]>('GET', '/api/channels'),

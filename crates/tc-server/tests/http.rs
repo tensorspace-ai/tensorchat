@@ -213,6 +213,198 @@ async fn logout_revokes_the_session_immediately() {
 }
 
 #[tokio::test]
+async fn changing_a_password_swaps_the_credential_and_keeps_the_caller_signed_in() {
+    let app = App::new();
+    let (token, _) = app.account("alice").await;
+
+    let (status, body) = app
+        .send(
+            "POST",
+            "/api/me/password",
+            Some(&token),
+            Some(json!({
+                "current_password": "correct horse battery",
+                "new_password": "a whole new passphrase",
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "change failed: {body}");
+
+    // The tab that made the change is still signed in.
+    let (status, _) = app.send("GET", "/api/me", Some(&token), None).await;
+    assert_eq!(status, StatusCode::OK);
+
+    // The old password no longer works, the new one does.
+    let (status, _) = app
+        .send(
+            "POST",
+            "/api/login",
+            None,
+            Some(json!({ "handle": "alice", "password": "correct horse battery" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let (status, _) = app
+        .send(
+            "POST",
+            "/api/login",
+            None,
+            Some(json!({ "handle": "alice", "password": "a whole new passphrase" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn changing_a_password_signs_other_devices_out() {
+    let app = App::new();
+    let (first, _) = app.account("alice").await;
+    // A second device: same account, its own session token.
+    let (_, second) = app
+        .send(
+            "POST",
+            "/api/login",
+            None,
+            Some(json!({ "handle": "alice", "password": "correct horse battery" })),
+        )
+        .await;
+    let second = second["token"].as_str().unwrap().to_string();
+    let (status, _) = app.send("GET", "/api/me", Some(&second), None).await;
+    assert_eq!(status, StatusCode::OK, "second device starts signed in");
+
+    let (_, body) = app
+        .send(
+            "POST",
+            "/api/me/password",
+            Some(&first),
+            Some(json!({
+                "current_password": "correct horse battery",
+                "new_password": "a whole new passphrase",
+            })),
+        )
+        .await;
+    assert_eq!(body["revoked"], 1);
+
+    // The whole point: a session is a bearer token that would otherwise outlive
+    // the password it was issued against.
+    let (status, _) = app.send("GET", "/api/me", Some(&second), None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn a_wrong_current_password_is_rejected_without_ending_the_session() {
+    let app = App::new();
+    let (token, _) = app.account("alice").await;
+
+    let (status, _) = app
+        .send(
+            "POST",
+            "/api/me/password",
+            Some(&token),
+            Some(json!({
+                "current_password": "not my password",
+                "new_password": "a whole new passphrase",
+            })),
+        )
+        .await;
+    // 400, not 401: the session is valid, the re-authentication is not. A 401
+    // would make the client treat a typo as an expired session.
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (status, _) = app.send("GET", "/api/me", Some(&token), None).await;
+    assert_eq!(status, StatusCode::OK, "a typo must not sign you out");
+
+    // And the password is unchanged.
+    let (status, _) = app
+        .send(
+            "POST",
+            "/api/login",
+            None,
+            Some(json!({ "handle": "alice", "password": "correct horse battery" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn a_new_password_must_still_meet_the_length_rule() {
+    let app = App::new();
+    let (token, _) = app.account("alice").await;
+
+    let (status, _) = app
+        .send(
+            "POST",
+            "/api/me/password",
+            Some(&token),
+            Some(json!({
+                "current_password": "correct horse battery",
+                "new_password": "short",
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // Rejected before anything changed.
+    let (status, _) = app
+        .send(
+            "POST",
+            "/api/login",
+            None,
+            Some(json!({ "handle": "alice", "password": "correct horse battery" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn other_sessions_can_be_revoked_without_changing_the_password() {
+    let app = App::new();
+    let (first, _) = app.account("alice").await;
+    let (_, second) = app
+        .send(
+            "POST",
+            "/api/login",
+            None,
+            Some(json!({ "handle": "alice", "password": "correct horse battery" })),
+        )
+        .await;
+    let second = second["token"].as_str().unwrap().to_string();
+
+    let (status, body) = app
+        .send("DELETE", "/api/me/sessions", Some(&first), None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["revoked"], 1);
+
+    let (status, _) = app.send("GET", "/api/me", Some(&second), None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _) = app.send("GET", "/api/me", Some(&first), None).await;
+    assert_eq!(status, StatusCode::OK, "the caller keeps their own session");
+}
+
+#[tokio::test]
+async fn one_users_password_change_leaves_everyone_else_signed_in() {
+    let app = App::new();
+    let (alice, _) = app.account("alice").await;
+    let (bob, _) = app.account("bob").await;
+
+    app.send(
+        "POST",
+        "/api/me/password",
+        Some(&alice),
+        Some(json!({
+            "current_password": "correct horse battery",
+            "new_password": "a whole new passphrase",
+        })),
+    )
+    .await;
+
+    let (status, _) = app.send("GET", "/api/me", Some(&bob), None).await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
 async fn registration_can_be_closed() {
     let cfg = Config {
         open_registration: false,

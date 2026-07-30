@@ -32,6 +32,8 @@ pub fn routes() -> Router<Shared> {
         .route("/api/login", post(login))
         .route("/api/logout", post(logout))
         .route("/api/me", get(me).patch(update_me))
+        .route("/api/me/password", post(change_password))
+        .route("/api/me/sessions", delete(revoke_other_sessions))
         .route("/api/users", get(list_users))
         .route("/api/channels", get(my_channels).post(create_channel))
         .route("/api/channels/browse", get(browse_channels))
@@ -192,6 +194,73 @@ async fn logout(State(st): State<Shared>, headers: HeaderMap) -> ApiResult<Statu
         st.db(move |s| s.delete_session(&hash)).await?;
     }
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+pub struct ChangePasswordReq {
+    current_password: String,
+    new_password: String,
+}
+
+/// Change a password and sign every *other* device out.
+///
+/// Revoking the rest is the point, not a courtesy: the usual reason to change a
+/// password is that the old one may be known to someone else, and sessions here
+/// are bearer tokens that outlive it. Without this, an attacker holding a stolen
+/// session would keep it for the full month of its TTL.
+async fn change_password(
+    State(st): State<Shared>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Auth(user): Auth,
+    headers: HeaderMap,
+    Json(req): Json<ChangePasswordReq>,
+) -> ApiResult<Json<RevokedRes>> {
+    // Rate-limited despite being authenticated: this endpoint verifies the
+    // current password, so an attacker holding a stolen session could otherwise
+    // use it to brute-force the password itself.
+    if !st.login_limiter.allow(peer.ip()) {
+        return Err(ApiError::RateLimited);
+    }
+
+    let id = user.id;
+    let stored = st.db(move |s| s.password_hash(id)).await?;
+    // Deliberately *not* the 401 that `AuthError` maps to by default: the
+    // session is perfectly valid, only the re-authentication failed. A 401 here
+    // would make clients treat a mistyped password as an expired session and
+    // bounce the user to the login screen.
+    auth::verify_password(&req.current_password, &stored)
+        .map_err(|_| ApiError::BadRequest("current password is incorrect".into()))?;
+    let phc = auth::hash_password(&req.new_password)?;
+
+    st.db(move |s| s.update_password(id, &phc)).await?;
+
+    // Spare the caller's own session, so changing a password does not bounce
+    // the tab that just changed it back to the login screen.
+    let keep = crate::state::bearer_token(&headers).map(|t| auth::token_hash(&t));
+    let revoked = st
+        .db(move |s| s.delete_sessions_for_user(id, keep.as_ref().map(|h| &h[..])))
+        .await?;
+    Ok(Json(RevokedRes { revoked }))
+}
+
+#[derive(Serialize)]
+pub struct RevokedRes {
+    /// How many other sessions were signed out.
+    revoked: usize,
+}
+
+/// Sign out every device except this one.
+async fn revoke_other_sessions(
+    State(st): State<Shared>,
+    Auth(user): Auth,
+    headers: HeaderMap,
+) -> ApiResult<Json<RevokedRes>> {
+    let id = user.id;
+    let keep = crate::state::bearer_token(&headers).map(|t| auth::token_hash(&t));
+    let revoked = st
+        .db(move |s| s.delete_sessions_for_user(id, keep.as_ref().map(|h| &h[..])))
+        .await?;
+    Ok(Json(RevokedRes { revoked }))
 }
 
 // ---------------------------------------------------------------- profile
