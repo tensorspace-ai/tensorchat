@@ -147,6 +147,12 @@ export const api = {
 
   thread: (root: Id) => request<Message[]>('GET', `/api/threads/${root}`),
 
+  /** A channel's pinned messages, hydrated and newest first. */
+  pins: (channel: Id) => request<Message[]>('GET', `/api/channels/${channel}/pins`),
+
+  setPin: (message: Id, on: boolean) =>
+    request<void>('POST', `/api/messages/${message}/pin`, { on }),
+
   openDm: (users: Id[]) => request<Channel>('POST', '/api/dm', { users }),
 
   markRead: (channel: Id, upTo: Id) =>

@@ -1,4 +1,4 @@
--- TensorChat schema (version 1).
+-- TensorChat schema (version 2).
 --
 -- Conventions:
 --   * Every `id` is a Snowflake (see tc-core::id). Because they are monotonic,
@@ -116,6 +116,20 @@ CREATE TABLE reactions (
     user_id    INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     emoji      TEXT    NOT NULL,
     PRIMARY KEY (message_id, user_id, emoji)
+) STRICT, WITHOUT ROWID;
+
+-- Pinned messages. Kept out of the `messages` table on purpose: a boolean
+-- column there would put pin churn on the same row as the message body, and it
+-- would have nowhere to record who pinned it or when.
+CREATE TABLE pins (
+    channel_id INTEGER NOT NULL REFERENCES channels (id) ON DELETE CASCADE,
+    message_id INTEGER NOT NULL REFERENCES messages (id) ON DELETE CASCADE,
+    pinned_by  INTEGER NOT NULL REFERENCES users (id),
+    pinned_at  INTEGER NOT NULL,
+    -- Channel first: the only read is "every pin in this channel", and this
+    -- makes it a contiguous range. It also makes double-pinning impossible
+    -- under a race, rather than something the application has to check for.
+    PRIMARY KEY (channel_id, message_id)
 ) STRICT, WITHOUT ROWID;
 
 CREATE TABLE attachments (

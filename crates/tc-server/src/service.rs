@@ -160,6 +160,44 @@ pub async fn set_reaction(
     Ok(())
 }
 
+/// Pin or unpin a message, and tell the channel.
+///
+/// Any member may pin, which is the same flat model that governs renaming and
+/// archiving: a channel's members are trusted with the channel. The membership
+/// check is against the channel the *message* is in, not one the caller named,
+/// so a message id alone cannot be used to pin into a channel you cannot see.
+pub async fn set_pin(st: &Shared, user: Id, message: Id, on: bool) -> ApiResult<()> {
+    // Resolve the channel first and authorize against it. Doing this before the
+    // write is what stops a non-member from learning whether a message id
+    // exists by watching which error comes back.
+    let target = st.db(move |s| s.message(message)).await?;
+    if !st.db(move |s| s.is_member(target.channel_id, user)).await? {
+        return Err(ApiError::Forbidden);
+    }
+
+    let (channel, changed) = if on {
+        st.db(move |s| s.pin_message(message, user, now_ms()))
+            .await?
+    } else {
+        st.db(move |s| s.unpin_message(message)).await?
+    };
+
+    // Re-broadcasting an unchanged toggle would make clients flicker a pin that
+    // never moved.
+    if changed {
+        st.hub.broadcast_frame(
+            channel,
+            &ServerFrame::Pin {
+                id: message,
+                channel,
+                by: user,
+                on,
+            },
+        );
+    }
+    Ok(())
+}
+
 /// Advance a read cursor and echo the new state to that user's other tabs.
 pub async fn mark_read(st: &Shared, user: Id, channel: Id, up_to: Id) -> ApiResult<ReadState> {
     let state = st.db(move |s| s.mark_read(channel, user, up_to)).await?;

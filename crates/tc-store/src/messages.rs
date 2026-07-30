@@ -21,8 +21,11 @@ pub const MAX_PAGE: u32 = 200;
 
 const MSG_COLS: &str =
     "id, channel_id, author_id, body, thread_root, reply_count, edited_at, deleted, mentions";
+/// The same list, table-qualified as `m`, for queries that join.
+pub(crate) const MSG_COLS_Q: &str = "m.id, m.channel_id, m.author_id, m.body, m.thread_root, \
+     m.reply_count, m.edited_at, m.deleted, m.mentions";
 
-fn map_message(row: &Row<'_>) -> rusqlite::Result<Message> {
+pub(crate) fn map_message(row: &Row<'_>) -> rusqlite::Result<Message> {
     let mentions: Option<Vec<u8>> = row.get(8)?;
     Ok(Message {
         id: from_sql(row.get(0)?),

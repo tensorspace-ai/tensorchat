@@ -235,6 +235,87 @@ export function SearchOverlay(
   return root;
 }
 
+// -- Pinned messages -----------------------------------------------------
+
+/**
+ * A channel's pinned messages.
+ *
+ * Rebuilt on change rather than diffed, like the thread pane: the list is
+ * capped server-side at a hundred, so the windowing machinery would be pure
+ * overhead.
+ */
+export function PinnedPane(store: Store, actions: MessageActions): HTMLElement {
+  const body = el('div', { class: 'pinned-body' });
+  const root = el(
+    'aside',
+    { class: 'pinned-pane', hidden: true, aria: { label: 'Pinned messages' } },
+    el(
+      'div',
+      { class: 'pane-header' },
+      el('span', { class: 'pane-title', text: 'Pinned' }),
+      el('button', {
+        class: 'icon-button',
+        text: '×',
+        title: 'Close',
+        on: { click: () => (root.hidden = true) },
+      }),
+    ),
+    body,
+  );
+
+  const messages = signal<Message[]>([]);
+
+  const load = (channel: Id) => {
+    void api
+      .pins(channel)
+      .then((list) => {
+        if (store.currentChannel() !== channel) return;
+        messages.set(list);
+        // The fetch is also how the store learns this channel's pin set, which
+        // is what marks pinned messages in the main scroll.
+        store.setPins(channel, list.map((m) => m.id));
+      })
+      .catch(() => messages.set([]));
+  };
+
+  // Reload whenever the channel changes or a pin lands. `store.pins()` covers
+  // both the local toggle and someone else's `pin` frame.
+  effect(() => {
+    const channel = store.currentChannel();
+    store.pins();
+    if (!channel) {
+      messages.set([]);
+      return;
+    }
+    if (!root.hidden) load(channel);
+  });
+
+  effect(() => {
+    const list = messages();
+    store.users();
+    if (list.length === 0) {
+      replace(body, [
+        el('div', {
+          class: 'empty',
+          text: 'Nothing pinned yet. Pin a message to keep it here.',
+        }),
+      ]);
+      return;
+    }
+    replace(
+      body,
+      list.map((m) => renderMessage(store, actions, m, false)),
+    );
+  });
+
+  (root as HTMLElement & { toggle?: () => void }).toggle = () => {
+    root.hidden = !root.hidden;
+    const channel = store.currentChannel();
+    if (!root.hidden && channel) load(channel);
+  };
+  return root;
+}
+
 // -- Member list ---------------------------------------------------------
 
 export function MemberList(store: Store, onOpenDm: (user: Id) => void): HTMLElement {

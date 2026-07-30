@@ -37,6 +37,7 @@ type Row =
 
 export type MessageActions = {
   react: (message: Id, emoji: string, on: boolean) => void;
+  setPin: (message: Id, on: boolean) => void;
   openThread: (root: Id) => void;
   edit: (message: Id, body: string) => void;
   remove: (message: Id) => void;
@@ -91,6 +92,9 @@ export function MessageList(store: Store, actions: MessageActions): HTMLElement 
     log.version();
     store.users();
     store.pending();
+    // Pins live outside the message log, so the log's version counter does not
+    // cover them; subscribe separately or a pin never repaints its message.
+    store.pins();
 
     const rows = buildRows(store, channel, log.messages);
     const wasPinned = list.isPinnedToBottom();
@@ -180,12 +184,15 @@ export function renderMessage(
   const meId = store.me()?.id;
   const mentionsMe = !!(meId && m.mn?.includes(meId));
 
+  const pinned = store.isPinned(m.ch, m.id);
+
   const root = el('div', {
     class: [
       'message',
       grouped ? 'grouped' : '',
       m.del ? 'deleted' : '',
       mentionsMe ? 'mentions-me' : '',
+      pinned ? 'pinned' : '',
     ]
       .filter(Boolean)
       .join(' '),
@@ -201,6 +208,13 @@ export function renderMessage(
   }
 
   const main = el('div', { class: 'message-main' });
+  // Inside `main`, not on the row: `.message` is a flex row, so a sibling of
+  // the gutter would land beside the avatar instead of above the text.
+  if (pinned) {
+    main.appendChild(
+      el('div', { class: 'pinned-flag' }, icon(ICONS.pin, 11), el('span', { text: 'Pinned' })),
+    );
+  }
   if (!grouped) {
     main.appendChild(
       el(
@@ -336,6 +350,21 @@ function hoverActions(store: Store, actions: MessageActions, m: Message): HTMLEl
       'button',
       { class: 'action', title: 'Reply in thread', on: { click: () => actions.openThread(m.id) } },
       icon(ICONS.thread, 14),
+    ),
+  );
+
+  // A pin belongs to the channel, not to the author, so anyone in the channel
+  // gets this — unlike edit and delete below.
+  const pinned = store.isPinned(m.ch, m.id);
+  bar.appendChild(
+    el(
+      'button',
+      {
+        class: `action${pinned ? ' active' : ''}`,
+        title: pinned ? 'Unpin' : 'Pin to channel',
+        on: { click: () => actions.setPin(m.id, !pinned) },
+      },
+      icon(ICONS.pin, 14),
     ),
   );
 

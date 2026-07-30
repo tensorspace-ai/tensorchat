@@ -34,15 +34,17 @@ use tc_core::Id;
 
 mod channels;
 mod messages;
+mod pins;
 mod search;
 mod users;
 
 pub use channels::NewChannel;
 pub use messages::{HistoryPage, NewMessage};
+pub use pins::MAX_PINS_PER_CHANNEL;
 pub use search::SearchQuery;
 
 /// Schema version embedded in the database via `PRAGMA user_version`.
-const SCHEMA_VERSION: i32 = 1;
+const SCHEMA_VERSION: i32 = 2;
 
 /// Incremental upgrades, each paired with the version it produces.
 ///
@@ -59,7 +61,10 @@ const SCHEMA_VERSION: i32 = 1;
 /// Entry `001` is the version 1 baseline and is never applied by
 /// [`Store::migrate`] — nothing predates it. It exists so the equivalence test
 /// has somewhere to start.
-const MIGRATIONS: &[(i32, &str)] = &[(1, include_str!("migrations/001_initial.sql"))];
+const MIGRATIONS: &[(i32, &str)] = &[
+    (1, include_str!("migrations/001_initial.sql")),
+    (2, include_str!("migrations/002_pins.sql")),
+];
 
 pub type Result<T> = std::result::Result<T, Error>;
 

@@ -1012,6 +1012,175 @@ async fn direct_messages_are_deduplicated_and_private() {
 }
 
 #[tokio::test]
+async fn messages_can_be_pinned_and_unpinned() {
+    let app = App::new();
+    let (alice, _) = app.account("alice").await;
+
+    let (_, channel) = app
+        .send(
+            "POST",
+            "/api/channels",
+            Some(&alice),
+            Some(json!({ "name": "general" })),
+        )
+        .await;
+    let ch = channel["id"].as_str().unwrap();
+
+    let (_, msg) = app
+        .send(
+            "POST",
+            &format!("/api/channels/{ch}/messages"),
+            Some(&alice),
+            Some(json!({ "body": "the deploy runbook" })),
+        )
+        .await;
+    let id = msg["id"].as_str().unwrap();
+
+    let (status, _) = app
+        .send(
+            "GET",
+            &format!("/api/channels/{ch}/pins"),
+            Some(&alice),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _) = app
+        .send(
+            "POST",
+            &format!("/api/messages/{id}/pin"),
+            Some(&alice),
+            Some(json!({ "on": true })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (_, pins) = app
+        .send(
+            "GET",
+            &format!("/api/channels/{ch}/pins"),
+            Some(&alice),
+            None,
+        )
+        .await;
+    let pins = pins.as_array().unwrap();
+    assert_eq!(pins.len(), 1);
+    assert_eq!(pins[0]["id"], id);
+    assert_eq!(pins[0]["b"], "the deploy runbook", "pins arrive hydrated");
+
+    let (status, _) = app
+        .send(
+            "POST",
+            &format!("/api/messages/{id}/pin"),
+            Some(&alice),
+            Some(json!({ "on": false })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (_, pins) = app
+        .send(
+            "GET",
+            &format!("/api/channels/{ch}/pins"),
+            Some(&alice),
+            None,
+        )
+        .await;
+    assert!(pins.as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn pins_are_invisible_and_unwritable_to_non_members() {
+    let app = App::new();
+    let (alice, _) = app.account("alice").await;
+    let (bob, _) = app.account("bob").await;
+
+    let (_, channel) = app
+        .send(
+            "POST",
+            "/api/channels",
+            Some(&alice),
+            Some(json!({ "name": "secrets", "private": true })),
+        )
+        .await;
+    let ch = channel["id"].as_str().unwrap();
+    let (_, msg) = app
+        .send(
+            "POST",
+            &format!("/api/channels/{ch}/messages"),
+            Some(&alice),
+            Some(json!({ "body": "the passphrase is" })),
+        )
+        .await;
+    let id = msg["id"].as_str().unwrap();
+
+    // Authorization is against the channel the *message* lives in, so a
+    // guessed message id cannot pin into a channel the caller cannot see.
+    let (status, _) = app
+        .send(
+            "POST",
+            &format!("/api/messages/{id}/pin"),
+            Some(&bob),
+            Some(json!({ "on": true })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, _) = app
+        .send("GET", &format!("/api/channels/{ch}/pins"), Some(&bob), None)
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn a_deleted_message_leaves_the_pinned_list() {
+    let app = App::new();
+    let (alice, _) = app.account("alice").await;
+
+    let (_, channel) = app
+        .send(
+            "POST",
+            "/api/channels",
+            Some(&alice),
+            Some(json!({ "name": "general" })),
+        )
+        .await;
+    let ch = channel["id"].as_str().unwrap();
+    let (_, msg) = app
+        .send(
+            "POST",
+            &format!("/api/channels/{ch}/messages"),
+            Some(&alice),
+            Some(json!({ "body": "temporary" })),
+        )
+        .await;
+    let id = msg["id"].as_str().unwrap();
+
+    app.send(
+        "POST",
+        &format!("/api/messages/{id}/pin"),
+        Some(&alice),
+        Some(json!({ "on": true })),
+    )
+    .await;
+    app.send("DELETE", &format!("/api/messages/{id}"), Some(&alice), None)
+        .await;
+
+    // A soft delete keeps the row for thread structure, but a tombstone must
+    // not sit in the pinned list as a blank entry.
+    let (_, pins) = app
+        .send(
+            "GET",
+            &format!("/api/channels/{ch}/pins"),
+            Some(&alice),
+            None,
+        )
+        .await;
+    assert!(pins.as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn search_is_scoped_to_channels_you_belong_to() {
     let app = App::new();
     let (alice, _) = app.account("alice").await;

@@ -156,6 +156,18 @@ pub enum ServerFrame {
         #[serde(rename = "on")]
         on: bool,
     },
+    /// A message was pinned or unpinned. **Broadcast** — a pin is a property of
+    /// the channel, identical for everyone in it, so unlike a reaction there is
+    /// no per-viewer flag to keep out of the frame.
+    Pin {
+        id: Id,
+        #[serde(rename = "ch")]
+        channel: Id,
+        #[serde(rename = "by")]
+        by: Id,
+        #[serde(rename = "on")]
+        on: bool,
+    },
     Typing {
         #[serde(rename = "ch")]
         channel: Id,

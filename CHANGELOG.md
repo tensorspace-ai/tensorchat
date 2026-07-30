@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Pinned messages** — any member can pin a message to a channel; pins appear
+  in a side pane, are marked in the main scroll, and are capped at 100 per
+  channel. `POST /api/messages/{id}/pin`, `GET /api/channels/{id}/pins`, and a
+  `pin` broadcast frame.
+- **Schema migrations** — the database is upgraded in place on startup. Fresh
+  installs get `schema.sql`; existing ones replay the numbered migrations newer
+  than their `user_version`. A test asserts the two paths produce an identical
+  schema.
 - **Password changes** — `POST /api/me/password`, which re-verifies the current
   password and then revokes every *other* session, plus
   `DELETE /api/me/sessions` to do the revocation on its own. Both are exposed in

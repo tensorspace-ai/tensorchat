@@ -54,6 +54,9 @@ export type PendingMessage = {
   failed: boolean;
 };
 
+/** Shared empty set, so `pinsIn` on an unopened channel allocates nothing. */
+const EMPTY_PINS: ReadonlySet<Id> = new Set<Id>();
+
 function newLog(): ChannelLog {
   return {
     messages: [],
@@ -71,6 +74,15 @@ export class Store {
   channels = signal<Map<Id, Channel>>(new Map());
   readStates = signal<Map<Id, ReadState>>(new Map());
   presence = signal<Map<Id, Presence>>(new Map());
+
+  /**
+   * Pinned message ids, per channel.
+   *
+   * Only ids: the bodies are already in the message log, and a channel's pins
+   * are fetched whole when it is opened rather than joined onto every history
+   * page — that keeps pin lookups off the hottest read in the product.
+   */
+  pins = signal<Map<Id, Set<Id>>>(new Map());
 
   /**
    * The most recent membership delta, so open views of a channel's roster
@@ -138,6 +150,32 @@ export class Store {
 
   unread(channel: Id): ReadState | undefined {
     return this.readStates().get(channel);
+  }
+
+  /** The pinned ids in a channel. Empty until the channel has been opened. */
+  pinsIn(channel: Id): ReadonlySet<Id> {
+    return this.pins().get(channel) ?? EMPTY_PINS;
+  }
+
+  isPinned(channel: Id, message: Id): boolean {
+    return this.pins().get(channel)?.has(message) ?? false;
+  }
+
+  /** Replace a channel's pin set wholesale, from a fetch. */
+  setPins(channel: Id, ids: Id[]): void {
+    this.pins.update((prev) => new Map(prev).set(channel, new Set(ids)));
+  }
+
+  /** Fold one pin delta in, from a `pin` frame or an optimistic toggle. */
+  setPinned(channel: Id, message: Id, on: boolean): void {
+    this.pins.update((prev) => {
+      const current = prev.get(channel);
+      if (on ? current?.has(message) : !current?.has(message)) return prev;
+      const next = new Set(current ?? []);
+      if (on) next.add(message);
+      else next.delete(message);
+      return new Map(prev).set(channel, next);
+    });
   }
 
   typingIn(channel: Id): Id[] {
@@ -304,6 +342,12 @@ export class Store {
         next.set(t.ch, forChannel);
         return next;
       });
+      return;
+    }
+
+    if ('pin' in frame) {
+      const p = frame.pin;
+      this.setPinned(p.ch, p.id, p.on);
       return;
     }
 

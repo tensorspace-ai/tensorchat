@@ -1141,6 +1141,36 @@ ul, ol {
   color: var(--danger-text);
 }
 
+/* A toggled-on action (pinned) stays lit while the bar is showing, so the
+   button reads as state rather than as a command. */
+.action.active {
+  color: var(--accent);
+}
+
+/* Marks a pinned message in the main scroll. Lives inside `.message-main`, so
+   it lines up with the body rather than with the avatar gutter. */
+.pinned-flag {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding-bottom: 2px;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+/* A count riding on a header icon (pinned messages). */
+.icon-button.with-count {
+  width: auto;
+  gap: 5px;
+  padding: 0 8px;
+}
+
+.icon-count {
+  font-size: 12px;
+  font-weight: 650;
+}
+
 
 /* ── 9. Rich text (richtext.ts) ────────────────────────────────────── */
 
@@ -1482,6 +1512,7 @@ mark {
 /* ── 12. Thread pane ───────────────────────────────────────────────── */
 
 .thread-pane,
+.pinned-pane,
 .member-pane {
   display: flex;
   flex-direction: column;
@@ -1490,6 +1521,13 @@ mark {
   overflow: hidden;
   background: var(--surface-1);
   border-left: 1px solid var(--border);
+}
+
+.pinned-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 0 16px;
 }
 
 .pane-header {

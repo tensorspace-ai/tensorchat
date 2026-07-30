@@ -54,6 +54,8 @@ pub fn routes() -> Router<Shared> {
             patch(edit_message).delete(delete_message),
         )
         .route("/api/messages/{id}/reactions", post(react))
+        .route("/api/messages/{id}/pin", post(set_pin))
+        .route("/api/channels/{id}/pins", get(channel_pins))
         .route("/api/messages/{id}/read", post(mark_read))
         .route("/api/threads/{id}", get(thread))
         .route("/api/dm", post(open_dm))
@@ -555,6 +557,36 @@ async fn react(
 ) -> ApiResult<StatusCode> {
     service::set_reaction(&st, u.id, id, &req.emoji, req.on).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+pub struct PinReq {
+    #[serde(default = "yes")]
+    on: bool,
+}
+
+async fn set_pin(
+    State(st): State<Shared>,
+    Auth(u): Auth,
+    Path(id): Path<Id>,
+    Json(req): Json<PinReq>,
+) -> ApiResult<StatusCode> {
+    service::set_pin(&st, u.id, id, req.on).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// The pinned messages in a channel, hydrated and newest first.
+///
+/// Fetched when a channel is opened rather than folded into the history query:
+/// pins are a small bounded set, and joining them onto every history page would
+/// put pin lookups on the hottest read in the product to serve a header bar.
+async fn channel_pins(
+    State(st): State<Shared>,
+    Auth(u): Auth,
+    Path(id): Path<Id>,
+) -> ApiResult<Json<Vec<Message>>> {
+    let uid = u.id;
+    Ok(Json(st.db(move |s| s.pinned_messages(id, uid)).await?))
 }
 
 #[derive(Deserialize)]

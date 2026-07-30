@@ -14,7 +14,7 @@ import type { Channel, Id } from './protocol.ts';
 import { Composer } from './ui/composer.ts';
 import { LoginScreen } from './ui/login.ts';
 import { MessageList, type MessageActions } from './ui/messages.ts';
-import { MemberList, SearchOverlay, ThreadPane } from './ui/panels.ts';
+import { MemberList, PinnedPane, SearchOverlay, ThreadPane } from './ui/panels.ts';
 import { Sidebar } from './ui/sidebar.ts';
 import {
   browseChannelsDialog,
@@ -96,7 +96,24 @@ function start(root: HTMLElement): void {
     store.openThread.set(null);
     const log = store.log(id);
     if (log.messages.length === 0) void loadHistory(id);
+    void loadPins(id);
     markCurrentRead();
+  }
+
+  /**
+   * Fetch a channel's pins once, on open.
+   *
+   * Deliberately not part of the history query: pins are a small bounded set
+   * that changes rarely, and joining them onto every page would put a pin
+   * lookup on the hottest read in the product to serve a marker and a panel.
+   */
+  async function loadPins(channel: Id): Promise<void> {
+    try {
+      const pinned = await api.pins(channel);
+      store.setPins(channel, pinned.map((m) => m.id));
+    } catch {
+      /* a missing pin marker is not worth interrupting the channel for */
+    }
   }
 
   function markCurrentRead(): void {
@@ -135,6 +152,14 @@ function start(root: HTMLElement): void {
 
   const messageActions: MessageActions = {
     react: (id, emoji, on) => conn.react(id, emoji, on),
+    setPin: (id, on) => {
+      const channel = store.currentChannel();
+      if (!channel) return;
+      // Optimistic, then reconciled by the server's `pin` broadcast — which
+      // arrives even for your own toggle, so a rejected pin snaps back.
+      store.setPinned(channel, id, on);
+      void api.setPin(id, on).catch(() => store.setPinned(channel, id, !on));
+    },
     openThread: (rootId) => store.openThread.set(rootId),
     edit: (id, body) => {
       const next = prompt('Edit message', body);
@@ -220,10 +245,12 @@ function start(root: HTMLElement): void {
   );
 
   const memberPane = MemberList(store, (user) => void openDmWith(user));
+  const pinnedPane = PinnedPane(store, messageActions);
   const search = SearchOverlay(store, (channel) => openChannel(channel));
 
   const channelHeader = ChannelHeader(store, {
     toggleMembers: () => (memberPane as HTMLElement & { toggle?: () => void }).toggle?.(),
+    togglePinned: () => (pinnedPane as HTMLElement & { toggle?: () => void }).toggle?.(),
     openSearch: () => search.open(),
   });
 
@@ -242,6 +269,7 @@ function start(root: HTMLElement): void {
         typingLine,
         composer,
       ),
+      pinnedPane,
       memberPane,
       threadPane,
       search,
@@ -309,13 +337,14 @@ function start(root: HTMLElement): void {
 
 function ChannelHeader(
   store: typeof import('./store.ts').store,
-  actions: { toggleMembers: () => void; openSearch: () => void },
+  actions: { toggleMembers: () => void; togglePinned: () => void; openSearch: () => void },
 ): HTMLElement {
   const root = el('header', { class: 'channel-header' });
   effect(() => {
     const id = store.currentChannel();
     const c = id ? store.channels().get(id) : undefined;
     store.users();
+    const pinCount = id ? store.pinsIn(id).size : 0;
     replace(root, [
       el(
         'div',
@@ -338,6 +367,20 @@ function ChannelHeader(
           { class: 'icon-button', title: 'Search (⌘K)', on: { click: actions.openSearch } },
           icon(ICONS.search, 17),
         ),
+        // Only offered once there is something to show — an always-present
+        // button that usually opens an empty panel is just noise in the header.
+        pinCount > 0
+          ? el(
+              'button',
+              {
+                class: 'icon-button with-count',
+                title: `${pinCount} pinned`,
+                on: { click: actions.togglePinned },
+              },
+              icon(ICONS.pin, 17),
+              el('span', { class: 'icon-count', text: String(pinCount) }),
+            )
+          : null,
         el(
           'button',
           { class: 'icon-button', title: 'Members', on: { click: actions.toggleMembers } },
