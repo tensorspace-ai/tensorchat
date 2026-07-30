@@ -20,7 +20,8 @@ event rather than one per recipient.
 
 **Messaging** — channels (public and private), direct and group messages,
 threaded replies, editing, deletion, emoji reactions, file attachments, and
-`@mentions` with `@here` / `@channel`.
+`@mentions` with `@here` / `@channel`. Private channels are invite-only, and any
+member can add or remove people.
 
 **Realtime** — WebSocket delivery of messages, reactions, typing indicators,
 presence, membership changes, and read state, with automatic reconnection and

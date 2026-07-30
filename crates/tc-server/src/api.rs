@@ -14,7 +14,7 @@ use std::net::SocketAddr;
 use axum::extract::{ConnectInfo, Multipart, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, patch, post};
+use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use tc_core::text::{self};
@@ -38,7 +38,11 @@ pub fn routes() -> Router<Shared> {
         .route("/api/channels/{id}", patch(update_channel))
         .route("/api/channels/{id}/join", post(join))
         .route("/api/channels/{id}/leave", post(leave))
-        .route("/api/channels/{id}/members", get(channel_members))
+        .route(
+            "/api/channels/{id}/members",
+            get(channel_members).post(add_members),
+        )
+        .route("/api/channels/{id}/members/{user}", delete(remove_member))
         .route(
             "/api/channels/{id}/messages",
             get(history).post(post_message),
@@ -344,6 +348,37 @@ async fn channel_members(
         return Err(ApiError::Forbidden);
     }
     Ok(Json(st.db(move |s| s.members(id)).await?))
+}
+
+#[derive(Deserialize)]
+pub struct AddMembersReq {
+    users: Vec<Id>,
+}
+
+#[derive(Serialize)]
+pub struct AddMembersRes {
+    /// Only the ids this call actually added. Anyone already in the channel is
+    /// absent, so the caller can report "3 added" honestly.
+    added: Vec<Id>,
+}
+
+async fn add_members(
+    State(st): State<Shared>,
+    Auth(u): Auth,
+    Path(id): Path<Id>,
+    Json(req): Json<AddMembersReq>,
+) -> ApiResult<Json<AddMembersRes>> {
+    let added = service::add_members(&st, &u, id, req.users).await?;
+    Ok(Json(AddMembersRes { added }))
+}
+
+async fn remove_member(
+    State(st): State<Shared>,
+    Auth(u): Auth,
+    Path((id, user)): Path<(Id, Id)>,
+) -> ApiResult<StatusCode> {
+    service::remove_member(&st, &u, id, user).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize)]

@@ -96,8 +96,8 @@ export const api = {
 
   browseChannels: () => request<Channel[]>('GET', '/api/channels/browse'),
 
-  createChannel: (name: string, isPrivate: boolean, topic = '') =>
-    request<Channel>('POST', '/api/channels', { name, private: isPrivate, topic }),
+  createChannel: (name: string, isPrivate: boolean, topic = '', members: Id[] = []) =>
+    request<Channel>('POST', '/api/channels', { name, private: isPrivate, topic, members }),
 
   updateChannel: (id: Id, patch: { name?: string; topic?: string; archived?: boolean }) =>
     request<Channel>('PATCH', `/api/channels/${id}`, patch),
@@ -107,6 +107,19 @@ export const api = {
   leaveChannel: (id: Id) => request<void>('POST', `/api/channels/${id}/leave`),
 
   members: (id: Id) => request<Id[]>('GET', `/api/channels/${id}/members`),
+
+  /**
+   * Add people to a channel. This is the only way into a private one, so the
+   * server requires the caller to already be a member.
+   *
+   * Resolves with just the ids that were actually added — anyone already in the
+   * channel is absent rather than an error.
+   */
+  addMembers: (id: Id, users: Id[]) =>
+    request<{ added: Id[] }>('POST', `/api/channels/${id}/members`, { users }),
+
+  removeMember: (id: Id, user: Id) =>
+    request<void>('DELETE', `/api/channels/${id}/members/${user}`),
 
   /** One page of history, newest first. Pass the previous page's cursor to page back. */
   history: (channel: Id, before?: Id | null, limit = 50) => {

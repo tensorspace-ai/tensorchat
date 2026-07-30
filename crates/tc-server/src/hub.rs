@@ -199,6 +199,25 @@ impl Hub {
         }
     }
 
+    /// The inverse of [`Hub::subscribe_user`]: drop every one of a user's
+    /// connections from a channel.
+    ///
+    /// Called whenever someone *loses* access — they left, or were removed.
+    /// Doing this server-side is not cosmetic: a subscription outlives
+    /// membership until the socket reconnects, so without this a removed member
+    /// keeps receiving a private channel's messages for as long as their tab
+    /// stays open.
+    pub fn unsubscribe_user(&self, user: Id, channel: Id) {
+        let Some(list) = self.user_conns.get(&user) else {
+            return;
+        };
+        let conns: Vec<ConnId> = list.read().clone();
+        drop(list);
+        for c in conns {
+            self.unsubscribe(c, &[channel]);
+        }
+    }
+
     /// Encode a frame once. Callers that fan out to several destinations should
     /// encode here and pass the result around, rather than re-encoding.
     pub fn encode(&self, frame: &ServerFrame) -> Encoded {
@@ -551,6 +570,32 @@ mod tests {
         assert_eq!(hub.subscriber_count(ch), 2);
         hub.subscribe_user(Id(999), ch);
         assert_eq!(hub.subscriber_count(ch), 2);
+    }
+
+    #[tokio::test]
+    async fn unsubscribing_a_user_stops_delivery_to_every_tab() {
+        // The mirror of the bug above: someone removed from a private channel
+        // kept receiving it in every tab, because membership was revoked in the
+        // database while the hub's routing table still listed their sockets.
+        let hub = Hub::new();
+        let (user, other, ch) = (Id(7), Id(8), Id(1));
+        let (_c1, mut r1) = hub.connect(user);
+        let (_c2, mut r2) = hub.connect(user);
+        let (_c3, _r3) = hub.connect(other);
+        hub.subscribe_user(user, ch);
+        hub.subscribe_user(other, ch);
+        assert_eq!(hub.subscriber_count(ch), 3);
+
+        hub.unsubscribe_user(user, ch);
+        assert_eq!(hub.subscriber_count(ch), 1, "only the other user remains");
+        assert_eq!(hub.broadcast_frame(ch, &frame("after removal")), 1);
+        assert!(r1.try_recv().is_err());
+        assert!(r2.try_recv().is_err());
+
+        // Idempotent, and harmless for someone who is not connected.
+        hub.unsubscribe_user(user, ch);
+        hub.unsubscribe_user(Id(999), ch);
+        assert_eq!(hub.subscriber_count(ch), 1);
     }
 
     #[tokio::test]

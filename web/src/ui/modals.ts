@@ -223,6 +223,100 @@ export function newDmDialog(store: Store, onOpened: (c: Channel) => void): void 
   search.focus();
 }
 
+/**
+ * Add people to a channel.
+ *
+ * This is the only route into a private channel, so it is deliberately a
+ * member-facing action rather than something buried in an admin screen.
+ * `existing` is excluded from the list — offering to add someone who is
+ * already there just invites a confusing no-op.
+ */
+export function addMembersDialog(
+  store: Store,
+  channel: Id,
+  existing: Iterable<Id>,
+  onAdded: (added: Id[]) => void,
+): void {
+  const already = new Set<Id>(existing);
+  const selected = new Set<Id>();
+  const search = el('input', {
+    class: 'modal-input',
+    placeholder: 'Find people…',
+    'aria-label': 'Find people',
+  }) as HTMLInputElement;
+  const list = el('div', { class: 'modal-list' });
+  const error = errorLine();
+  const submit = el('button', {
+    class: 'modal-submit',
+    text: 'Add',
+    disabled: true,
+  }) as HTMLButtonElement;
+
+  const d = dialog('Add people', search, list, error, submit);
+
+  const render = () => {
+    const q = search.value.trim().toLowerCase();
+    const people = [...store.users().values()]
+      .filter((u) => !already.has(u.id) && !u.d)
+      .filter((u) => !q || u.h.includes(q) || u.n.toLowerCase().includes(q))
+      .slice(0, 40);
+
+    if (people.length === 0) {
+      replace(list, [
+        el('div', {
+          class: 'empty',
+          text: q ? 'Nobody matches that.' : 'Everyone is already here.',
+        }),
+      ]);
+      return;
+    }
+
+    replace(
+      list,
+      people.map((u: User) =>
+        el(
+          'button',
+          {
+            class: `person-row${selected.has(u.id) ? ' selected' : ''}`,
+            on: {
+              click: () => {
+                if (selected.has(u.id)) selected.delete(u.id);
+                else selected.add(u.id);
+                submit.disabled = selected.size === 0;
+                render();
+              },
+            },
+          },
+          avatar(u.id, u.n || u.h, 28),
+          el(
+            'span',
+            { class: 'person-main' },
+            el('span', { class: 'person-name', text: u.n || u.h }),
+            el('span', { class: 'person-handle', text: `@${u.h}` }),
+          ),
+          el('span', { class: `presence presence-${store.presenceOf(u.id)}` }),
+        ),
+      ),
+    );
+  };
+
+  search.addEventListener('input', render);
+  submit.addEventListener('click', async () => {
+    submit.disabled = true;
+    try {
+      const { added } = await api.addMembers(channel, [...selected]);
+      onAdded(added);
+      d.close();
+    } catch (err) {
+      showError(error, err);
+      submit.disabled = false;
+    }
+  });
+
+  render();
+  search.focus();
+}
+
 export function preferencesDialog(store: Store, onSaved: (u: User) => void, onLogout: () => void): void {
   const me = store.me();
   if (!me) return;

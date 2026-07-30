@@ -1589,6 +1589,36 @@ mark {
   text-overflow: ellipsis;
 }
 
+.member-row-wrap {
+  display: flex;
+  align-items: center;
+}
+
+/* Revealed on hover so a roster of fifty people is not fifty dismiss buttons
+   competing with the names. */
+.member-remove {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-right: 4px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity var(--speed) var(--ease), background var(--speed) var(--ease);
+}
+
+.member-row-wrap:hover .member-remove,
+.member-remove:focus-visible {
+  opacity: 1;
+}
+
+.member-remove:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
 
 /* ── 14. Search overlay ────────────────────────────────────────────── */
 

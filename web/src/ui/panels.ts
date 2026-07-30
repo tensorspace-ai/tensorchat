@@ -14,6 +14,7 @@ import { renderSnippet } from '../richtext.ts';
 import type { Id, Message, SearchHit } from '../protocol.ts';
 import type { Store } from '../store.ts';
 import { renderMessage, type MessageActions } from './messages.ts';
+import { addMembersDialog } from './modals.ts';
 import { avatar } from './sidebar.ts';
 
 // -- Thread pane ---------------------------------------------------------
@@ -238,20 +239,28 @@ export function SearchOverlay(
 
 export function MemberList(store: Store, onOpenDm: (user: Id) => void): HTMLElement {
   const body = el('div', { class: 'member-body' });
+  const add = el('button', {
+    class: 'icon-button',
+    title: 'Add people',
+    text: '+',
+    hidden: true,
+  }) as HTMLButtonElement;
   const root = el(
     'aside',
     { class: 'member-pane', hidden: true, aria: { label: 'Members' } },
-    el('div', { class: 'pane-header' }, el('span', { class: 'pane-title', text: 'Members' })),
+    el(
+      'div',
+      { class: 'pane-header' },
+      el('span', { class: 'pane-title', text: 'Members' }),
+      add,
+    ),
     body,
   );
 
   const members = signal<Id[]>([]);
   let loadedFor: Id | null = null;
 
-  effect(() => {
-    const channel = store.currentChannel();
-    if (!channel || channel === loadedFor) return;
-    loadedFor = channel;
+  const load = (channel: Id) => {
     const known = store.channels().get(channel);
     if (known?.m?.length) {
       members.set(known.m);
@@ -263,12 +272,41 @@ export function MemberList(store: Store, onOpenDm: (user: Id) => void): HTMLElem
         })
         .catch(() => members.set([]));
     }
+  };
+
+  effect(() => {
+    const channel = store.currentChannel();
+    if (!channel || channel === loadedFor) return;
+    loadedFor = channel;
+    load(channel);
+  });
+
+  // Someone was added or removed while the pane is open. Refetching is one
+  // small query and keeps this list the server's answer rather than a guess
+  // assembled from deltas.
+  effect(() => {
+    const change = store.memberChange();
+    if (change && change.ch === store.currentChannel()) load(change.ch);
   });
 
   effect(() => {
     const ids = members();
     store.presence();
     store.users();
+    const channel = store.currentChannel();
+    const kind = channel ? store.channels().get(channel)?.k : undefined;
+    // A direct conversation's roster is fixed — it is what identifies the
+    // conversation — so the editing controls only make sense on named channels.
+    const editable = channel !== null && kind !== 'dm' && kind !== 'group';
+    const meId = store.me()?.id;
+
+    add.hidden = !editable;
+    add.onclick = editable
+      ? () => addMembersDialog(store, channel, members(), (added) => {
+          if (added.length) members.update((prev) => [...prev, ...added]);
+        })
+      : null;
+
     const sorted = [...ids].sort((a, b) => {
       const pa = store.presenceOf(a) === 'offline' ? 1 : 0;
       const pb = store.presenceOf(b) === 'offline' ? 1 : 0;
@@ -278,11 +316,33 @@ export function MemberList(store: Store, onOpenDm: (user: Id) => void): HTMLElem
       body,
       sorted.map((id) =>
         el(
-          'button',
-          { class: 'member-row', on: { click: () => onOpenDm(id) } },
-          avatar(id, store.userName(id), 26),
-          el('span', { class: 'member-name', text: store.userName(id) }),
-          el('span', { class: `presence presence-${store.presenceOf(id)}` }),
+          'div',
+          { class: 'member-row-wrap' },
+          el(
+            'button',
+            { class: 'member-row', on: { click: () => onOpenDm(id) } },
+            avatar(id, store.userName(id), 26),
+            el('span', { class: 'member-name', text: store.userName(id) }),
+            el('span', { class: `presence presence-${store.presenceOf(id)}` }),
+          ),
+          // Removing yourself is a leave, which lives on the channel menu;
+          // offering it twice under two names would only confuse.
+          editable && id !== meId
+            ? el('button', {
+                class: 'member-remove',
+                text: '×',
+                title: `Remove ${store.userName(id)}`,
+                on: {
+                  click: () => {
+                    if (!channel) return;
+                    void api
+                      .removeMember(channel, id)
+                      .then(() => members.update((prev) => prev.filter((m) => m !== id)))
+                      .catch(() => load(channel));
+                  },
+                },
+              })
+            : null,
         ),
       ),
     );

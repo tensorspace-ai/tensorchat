@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Channel invitations** — `POST /api/channels/{id}/members` and
+  `DELETE /api/channels/{id}/members/{user}`, with an "Add people" control in the
+  member pane. Private channels previously had no way in after creation: `join`
+  refuses them by design, and nothing else could grant membership.
+
+### Fixed
+
+- Leaving or being removed from a channel now drops the hub subscription as well
+  as the membership row. A subscription used to outlive membership until the
+  socket reconnected, so a departed member kept receiving a private channel's
+  messages for as long as their tab stayed open.
+
 ## [0.1.0] — 2026-07-29
 
 Initial release.

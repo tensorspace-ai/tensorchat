@@ -298,6 +298,120 @@ pub async fn leave_channel(st: &Shared, user: &User, channel: Id) -> ApiResult<(
                 join: false,
             },
         );
+        st.hub.unsubscribe_user(user_id, channel);
+    }
+    Ok(())
+}
+
+/// The most people one call may add.
+///
+/// Bounds the work a single request can cause: every addition is a broadcast
+/// plus a per-user frame, so an unbounded list would be an amplification lever.
+const MAX_ADD_MEMBERS: usize = 50;
+
+/// Add people to a named channel.
+///
+/// This is the only way into a private channel — [`join_channel`] refuses them
+/// by design, so that knowing an id is not enough to walk in — which makes the
+/// authorization rule "the caller must already be inside". That matches the
+/// rest of the channel surface, where membership rather than a role is what
+/// grants the right to reconfigure.
+pub async fn add_members(
+    st: &Shared,
+    actor: &User,
+    channel: Id,
+    users: Vec<Id>,
+) -> ApiResult<Vec<Id>> {
+    let actor_id = actor.id;
+    if !st.db(move |s| s.is_member(channel, actor_id)).await? {
+        return Err(ApiError::Forbidden);
+    }
+
+    let target = st.db(move |s| s.channel(channel)).await?;
+    if target.kind.is_direct() {
+        // A direct conversation is keyed by its exact member set, so growing
+        // one would either collide with an existing group or silently become a
+        // different conversation. Opening a new group DM is the honest answer.
+        return Err(ApiError::BadRequest(
+            "start a new group message instead of adding to this one".into(),
+        ));
+    }
+    if target.archived {
+        return Err(ApiError::BadRequest("channel is archived".into()));
+    }
+
+    let mut wanted = users;
+    wanted.sort_unstable();
+    wanted.dedup();
+    if wanted.is_empty() {
+        return Err(ApiError::BadRequest("nobody to add".into()));
+    }
+    if wanted.len() > MAX_ADD_MEMBERS {
+        return Err(ApiError::BadRequest(format!(
+            "cannot add more than {MAX_ADD_MEMBERS} people at once"
+        )));
+    }
+
+    let added = st
+        .db(move |s| s.add_members(channel, &wanted, now_ms()))
+        .await?;
+
+    let chan = ServerFrame::Chan {
+        channel: target.clone(),
+    };
+    for user in &added {
+        // Subscribe before the broadcast, so the new member sees their own
+        // arrival and every message that follows it — the same ordering
+        // `join_channel` relies on.
+        st.hub.subscribe_user(*user, channel);
+        st.hub.broadcast_frame(
+            channel,
+            &ServerFrame::Member {
+                channel,
+                user: *user,
+                join: true,
+            },
+        );
+        // They are not in any sidebar yet; a Chan frame is what puts the
+        // channel there without waiting for a reload.
+        st.hub.send_to_user(*user, &chan);
+    }
+    Ok(added)
+}
+
+/// Remove someone from a named channel.
+///
+/// Any member may remove any other, which is the same flat model that lets any
+/// member rename or archive a channel. Removing yourself is exactly a leave, so
+/// it is routed there rather than duplicated.
+pub async fn remove_member(st: &Shared, actor: &User, channel: Id, user: Id) -> ApiResult<()> {
+    if user == actor.id {
+        return leave_channel(st, actor, channel).await;
+    }
+
+    let actor_id = actor.id;
+    if !st.db(move |s| s.is_member(channel, actor_id)).await? {
+        return Err(ApiError::Forbidden);
+    }
+    let target = st.db(move |s| s.channel(channel)).await?;
+    if target.kind.is_direct() {
+        return Err(ApiError::BadRequest(
+            "direct message membership is fixed".into(),
+        ));
+    }
+
+    if st.db(move |s| s.leave_channel(channel, user)).await? {
+        st.hub.broadcast_frame(
+            channel,
+            &ServerFrame::Member {
+                channel,
+                user,
+                join: false,
+            },
+        );
+        // Their subscription would otherwise outlive their membership until
+        // the socket reconnects — in a private channel, that is a leak.
+        st.hub.unsubscribe_user(user, channel);
     }
     Ok(())
 }

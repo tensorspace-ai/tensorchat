@@ -276,6 +276,50 @@ impl Store {
         Ok(n > 0)
     }
 
+    /// Add several people at once. Returns the ids that actually joined, so the
+    /// caller broadcasts one membership event per real change rather than one
+    /// per requested id.
+    ///
+    /// An unknown or deactivated id fails the whole call rather than being
+    /// skipped: a half-applied invite is harder to explain to the person who
+    /// issued it than a rejected one, and the transaction makes "all or
+    /// nothing" free.
+    pub fn add_members(&self, channel: Id, users: &[Id], now_ms: u64) -> Result<Vec<Id>> {
+        if users.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut conn = self.conn()?;
+        // IMMEDIATE for the same reason as everywhere else in this crate: this
+        // reads (does the user exist?) before it writes, and a DEFERRED
+        // transaction upgrading to a write cannot be rescued by busy_timeout.
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+
+        let mut added = Vec::with_capacity(users.len());
+        {
+            let mut exists =
+                tx.prepare_cached("SELECT 1 FROM users WHERE id = ? AND deactivated = 0")?;
+            let mut insert = tx.prepare_cached(
+                "INSERT OR IGNORE INTO members (channel_id, user_id, joined_at) VALUES (?, ?, ?)",
+            )?;
+            for user in users {
+                if exists
+                    .query_row([to_sql(*user)], |r| r.get::<_, i64>(0))
+                    .optional()?
+                    .is_none()
+                {
+                    return Err(Error::NotFound);
+                }
+                // OR IGNORE: adding someone who is already in the channel is a
+                // no-op, not an error — two people can invite the same person.
+                if insert.execute(params![to_sql(channel), to_sql(*user), now_ms as i64])? > 0 {
+                    added.push(*user);
+                }
+            }
+        }
+        tx.commit()?;
+        Ok(added)
+    }
+
     /// Remove a member. Idempotent; returns whether anything changed.
     pub fn leave_channel(&self, channel: Id, user: Id) -> Result<bool> {
         let conn = self.conn()?;

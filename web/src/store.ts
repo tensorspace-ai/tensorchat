@@ -72,6 +72,13 @@ export class Store {
   readStates = signal<Map<Id, ReadState>>(new Map());
   presence = signal<Map<Id, Presence>>(new Map());
 
+  /**
+   * The most recent membership delta, so open views of a channel's roster
+   * update when someone is added or removed rather than going stale until the
+   * pane is reopened. Null until the first one arrives.
+   */
+  memberChange = signal<{ ch: Id; u: Id; j: boolean } | null>(null);
+
   /** Currently open channel, or null on the empty state. */
   currentChannel = signal<Id | null>(null);
   /** Open thread's root message id, or null when the thread pane is closed. */
@@ -331,6 +338,21 @@ export class Store {
         this.logs.delete(mem.ch);
         if (this.currentChannel() === mem.ch) this.currentChannel.set(null);
       }
+      // Direct conversations carry their roster on the channel itself, so keep
+      // that copy in step; named channels are fetched on demand and watch
+      // `memberChange` instead.
+      const channel = this.channels().get(mem.ch);
+      if (channel?.m) {
+        const next = mem.j
+          ? channel.m.includes(mem.u)
+            ? channel.m
+            : [...channel.m, mem.u]
+          : channel.m.filter((id) => id !== mem.u);
+        if (next !== channel.m) {
+          this.channels.update((prev) => new Map(prev).set(mem.ch, { ...channel, m: next }));
+        }
+      }
+      this.memberChange.set({ ch: mem.ch, u: mem.u, j: mem.j });
       return;
     }
 

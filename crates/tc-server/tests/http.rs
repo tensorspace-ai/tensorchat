@@ -355,6 +355,232 @@ async fn non_members_cannot_read_or_write_a_private_channel() {
 }
 
 #[tokio::test]
+async fn a_member_can_invite_someone_into_a_private_channel() {
+    let app = App::new();
+    let (alice, _) = app.account("alice").await;
+    let (bob, bob_id) = app.account("bob").await;
+
+    let (_, channel) = app
+        .send(
+            "POST",
+            "/api/channels",
+            Some(&alice),
+            Some(json!({ "name": "secrets", "private": true })),
+        )
+        .await;
+    let ch = channel["id"].as_str().unwrap();
+
+    let (status, body) = app
+        .send(
+            "POST",
+            &format!("/api/channels/{ch}/members"),
+            Some(&alice),
+            Some(json!({ "users": [bob_id] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "invite failed: {body}");
+    assert_eq!(body["added"], json!([bob_id]));
+
+    // The whole point: a private channel is now reachable by its members.
+    let (status, _) = app
+        .send(
+            "GET",
+            &format!("/api/channels/{ch}/messages"),
+            Some(&bob),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // And it shows up in their sidebar without a reconnect.
+    let (_, mine) = app.send("GET", "/api/channels", Some(&bob), None).await;
+    assert!(mine.as_array().unwrap().iter().any(|c| c["id"] == ch));
+
+    // Adding someone already inside is a no-op, not an error.
+    let (status, body) = app
+        .send(
+            "POST",
+            &format!("/api/channels/{ch}/members"),
+            Some(&alice),
+            Some(json!({ "users": [bob_id] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["added"], json!([]), "second invite adds nobody");
+}
+
+#[tokio::test]
+async fn outsiders_cannot_invite_themselves_or_others_into_a_private_channel() {
+    let app = App::new();
+    let (alice, _) = app.account("alice").await;
+    let (bob, bob_id) = app.account("bob").await;
+    let (_, carol_id) = app.account("carol").await;
+
+    let (_, channel) = app
+        .send(
+            "POST",
+            "/api/channels",
+            Some(&alice),
+            Some(json!({ "name": "secrets", "private": true })),
+        )
+        .await;
+    let ch = channel["id"].as_str().unwrap();
+
+    // The invite path must not become a way around `join` refusing outsiders.
+    for target in [&bob_id, &carol_id] {
+        let (status, _) = app
+            .send(
+                "POST",
+                &format!("/api/channels/{ch}/members"),
+                Some(&bob),
+                Some(json!({ "users": [target] })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "adding {target}");
+    }
+}
+
+#[tokio::test]
+async fn a_removed_member_loses_access() {
+    let app = App::new();
+    let (alice, _) = app.account("alice").await;
+    let (bob, bob_id) = app.account("bob").await;
+
+    let (_, channel) = app
+        .send(
+            "POST",
+            "/api/channels",
+            Some(&alice),
+            Some(json!({ "name": "secrets", "private": true, "members": [bob_id] })),
+        )
+        .await;
+    let ch = channel["id"].as_str().unwrap();
+
+    let (status, _) = app
+        .send(
+            "GET",
+            &format!("/api/channels/{ch}/messages"),
+            Some(&bob),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "bob starts out inside");
+
+    let (status, _) = app
+        .send(
+            "DELETE",
+            &format!("/api/channels/{ch}/members/{bob_id}"),
+            Some(&alice),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (status, _) = app
+        .send(
+            "GET",
+            &format!("/api/channels/{ch}/messages"),
+            Some(&bob),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "removal must revoke reads");
+
+    // Idempotent: removing someone who is already gone is not an error.
+    let (status, _) = app
+        .send(
+            "DELETE",
+            &format!("/api/channels/{ch}/members/{bob_id}"),
+            Some(&alice),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn direct_message_membership_cannot_be_edited() {
+    let app = App::new();
+    let (alice, _) = app.account("alice").await;
+    let (_, bob_id) = app.account("bob").await;
+    let (_, carol_id) = app.account("carol").await;
+
+    let (_, dm) = app
+        .send(
+            "POST",
+            "/api/dm",
+            Some(&alice),
+            Some(json!({ "users": [bob_id] })),
+        )
+        .await;
+    let ch = dm["id"].as_str().unwrap();
+
+    // A DM is keyed by its exact member set; growing one in place would either
+    // collide with an existing group or silently change the conversation.
+    let (status, _) = app
+        .send(
+            "POST",
+            &format!("/api/channels/{ch}/members"),
+            Some(&alice),
+            Some(json!({ "users": [carol_id] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (status, _) = app
+        .send(
+            "DELETE",
+            &format!("/api/channels/{ch}/members/{bob_id}"),
+            Some(&alice),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn inviting_an_unknown_user_adds_nobody() {
+    let app = App::new();
+    let (alice, _) = app.account("alice").await;
+    let (_, bob_id) = app.account("bob").await;
+
+    let (_, channel) = app
+        .send(
+            "POST",
+            "/api/channels",
+            Some(&alice),
+            Some(json!({ "name": "secrets", "private": true })),
+        )
+        .await;
+    let ch = channel["id"].as_str().unwrap();
+
+    // All-or-nothing: a batch naming one ghost must not half-apply.
+    let (status, _) = app
+        .send(
+            "POST",
+            &format!("/api/channels/{ch}/members"),
+            Some(&alice),
+            Some(json!({ "users": [bob_id, "999999999999999999"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let (_, members) = app
+        .send(
+            "GET",
+            &format!("/api/channels/{ch}/members"),
+            Some(&alice),
+            None,
+        )
+        .await;
+    assert_eq!(
+        members.as_array().unwrap().len(),
+        1,
+        "only alice should be a member"
+    );
+}
+
+#[tokio::test]
 async fn a_public_channel_can_be_browsed_and_joined() {
     let app = App::new();
     let (alice, _) = app.account("alice").await;
