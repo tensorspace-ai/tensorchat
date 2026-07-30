@@ -28,12 +28,13 @@ presence, membership changes, and read state, with automatic reconnection and
 resynchronization.
 
 **Reading** — unread and mention badges, a per-channel read cursor synchronized
-across devices, and full-text search with highlighted snippets, scoped to the
-channels you belong to.
+across devices, pinned and saved messages, per-channel mute, and full-text
+search with highlighted snippets, scoped to the channels you belong to.
 
 **Client** — virtual-scrolled history that stays smooth over a hundred thousand
 messages, optimistic sending, per-channel drafts, mention autocomplete, drag-drop
-and paste-to-upload, a light and dark theme, and keyboard navigation.
+and paste-to-upload, opt-in desktop notifications, a light and dark theme, and
+keyboard navigation.
 
 ---
 
@@ -78,7 +79,9 @@ Open <http://127.0.0.1:8080> and create an account. The first thing to do is
 make a channel.
 
 The database (`tensorchat.db`) and uploads (`blobs/`) are created on first run.
-Nothing else is needed — no migrations to apply, no services to start.
+Nothing else is needed — no migration step to run, no services to start. Later
+upgrades apply their schema changes on startup, so deploying a new version is
+still just restarting the binary.
 
 ### With Docker
 
@@ -200,8 +203,8 @@ than reporting its own backlog as server loss.
 ## Testing
 
 ```sh
-cargo test --workspace     # 138 tests
-cd web && npm test         # 81 tests
+cargo test --workspace     # 175 tests
+cd web && npm test         # 97 tests
 cd web && npx tsc --noEmit # type check
 ```
 
@@ -246,7 +249,9 @@ Honest ones, since a chat server invites comparison:
   on every table and a join on every query.
 - **The user directory ships whole at connect.** Fine into the low thousands;
   beyond that it needs paging.
-- **No push notifications, no voice, no calls, no bridges.**
+- **No Web Push.** Desktop notifications work while a tab is open; waking a
+  device with no page open would need a service worker, VAPID keys, and a
+  subscription store. No voice, no calls, no bridges.
 - **Search is FTS5.** Excellent for message bodies, not a relevance-tuned
   engine.
 

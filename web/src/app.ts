@@ -9,6 +9,7 @@ import { effect } from './signals.ts';
 import { api, setToken } from './api.ts';
 import { Connection } from './ws.ts';
 import { store } from './store.ts';
+import { createNotifier } from './notify.ts';
 import { idCompare } from './protocol.ts';
 import type { Channel, Id } from './protocol.ts';
 import { Composer } from './ui/composer.ts';
@@ -49,9 +50,16 @@ export function mount(root: HTMLElement): void {
 }
 
 function start(root: HTMLElement): void {
+  // Declared before the connection so `onFrame` can reach it; it only needs
+  // `openChannel`, which is hoisted.
+  const notifier = createNotifier(store, (channel) => openChannel(channel));
+
   const conn = new Connection({
     onFrame: (frame) => {
       store.apply(frame);
+      // After `apply`, so the notifier sees the channel and mute state the
+      // frame may have just established.
+      notifier.consider(frame);
       // Belt and braces. The server subscribes a user's live connections when
       // they gain access to a channel, so this is normally redundant — but
       // subscribing is idempotent, and a channel we can see but do not receive
@@ -191,6 +199,7 @@ function start(root: HTMLElement): void {
     openPreferences: () =>
       preferencesDialog(
         store,
+        notifier,
         (u) => store.me.set(u),
         () => {
           void api.logout().catch(() => {});

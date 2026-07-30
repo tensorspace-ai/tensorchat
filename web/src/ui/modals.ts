@@ -10,6 +10,7 @@
 import { el, replace } from '../dom.ts';
 import { ApiError, api } from '../api.ts';
 import type { Channel, Id, User } from '../protocol.ts';
+import type { Notifier } from '../notify.ts';
 import type { Store } from '../store.ts';
 import { avatar } from './sidebar.ts';
 
@@ -317,7 +318,12 @@ export function addMembersDialog(
   search.focus();
 }
 
-export function preferencesDialog(store: Store, onSaved: (u: User) => void, onLogout: () => void): void {
+export function preferencesDialog(
+  store: Store,
+  notifier: Notifier,
+  onSaved: (u: User) => void,
+  onLogout: () => void,
+): void {
   const me = store.me();
   if (!me) return;
 
@@ -344,6 +350,30 @@ export function preferencesDialog(store: Store, onSaved: (u: User) => void, onLo
       'aria-label': label,
     }) as HTMLInputElement;
 
+  const notifyToggle = el('input', {
+    type: 'checkbox',
+    checked: notifier.enabled(),
+  }) as HTMLInputElement;
+  const notifyNote = el('p', { class: 'modal-hint', hidden: true, role: 'status' });
+
+  notifyToggle.addEventListener('change', () => {
+    const asked = notifyToggle.checked;
+    // Permission can only be requested from a user gesture, which is exactly
+    // what this handler is — so the prompt appears rather than being ignored.
+    void notifier.setEnabled(asked).then((on) => {
+      // The checkbox follows what actually happened, not what was clicked: a
+      // browser that blocks notifications must not leave it looking enabled.
+      notifyToggle.checked = on;
+      if (asked && !on) {
+        notifyNote.textContent =
+          'Your browser is blocking notifications for this site. Allow them in its site settings to turn this on.';
+        notifyNote.hidden = false;
+      } else {
+        notifyNote.hidden = true;
+      }
+    });
+  });
+
   const currentPassword = password('Current password', 'current-password');
   const newPassword = password('New password', 'new-password');
   const confirmPassword = password('Confirm new password', 'new-password');
@@ -365,6 +395,21 @@ export function preferencesDialog(store: Store, onSaved: (u: User) => void, onLo
     status,
     error,
     submit,
+
+    el('hr', { class: 'modal-divider' }),
+    el('h3', { class: 'modal-section', text: 'Notifications' }),
+    notifier.supported
+      ? el(
+          'label',
+          { class: 'modal-check' },
+          notifyToggle,
+          el('span', { text: 'Notify me about mentions and direct messages' }),
+        )
+      : el('p', {
+          class: 'modal-hint',
+          text: 'This browser does not support desktop notifications.',
+        }),
+    notifyNote,
 
     el('hr', { class: 'modal-divider' }),
     el('h3', { class: 'modal-section', text: 'Password' }),

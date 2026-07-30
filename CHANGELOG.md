@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Desktop notifications** — mentions and direct messages raise a browser
+  notification when you are not already looking at them. Opt-in from
+  Preferences. Client-side only; real Web Push is still not implemented.
 - **Channel mute** — `POST /api/channels/{id}/mute`, with a toggle in the
   channel header. A muted channel loses its unread emphasis but keeps its
   mention badge, and the counts are still reported truthfully rather than
