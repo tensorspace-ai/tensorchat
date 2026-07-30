@@ -5,7 +5,7 @@
 //! uploads, and administration. It is also the whole API a bot needs — the
 //! WebSocket is an optimization for interactive clients, not a requirement.
 //!
-//! Responses are JSON (IDs as strings, see `tc_core::id`). The realtime path
+//! Responses are JSON (IDs as strings, see `tensorchat_core::id`). The realtime path
 //! uses MessagePack because it is the one that runs thousands of times a
 //! second; a login does not need those bytes back.
 
@@ -17,9 +17,9 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
-use tc_core::text::{self};
-use tc_core::{Channel, ChannelKind, Id, Message, SearchHit, User, now_ms};
-use tc_store::SearchQuery;
+use tensorchat_core::text::{self};
+use tensorchat_core::{Channel, ChannelKind, Id, Message, SearchHit, User, now_ms};
+use tensorchat_store::SearchQuery;
 
 use crate::auth;
 use crate::error::{ApiError, ApiResult};
@@ -343,7 +343,7 @@ async fn update_me(
     for u in st.hub.online_users() {
         st.hub.send_to_user(
             u,
-            &tc_core::ServerFrame::UserUpd {
+            &tensorchat_core::ServerFrame::UserUpd {
                 user: updated.clone(),
             },
         );
@@ -406,7 +406,7 @@ async fn admin_update_user(
     for u in st.hub.online_users() {
         st.hub.send_to_user(
             u,
-            &tc_core::ServerFrame::UserUpd {
+            &tensorchat_core::ServerFrame::UserUpd {
                 user: updated.clone(),
             },
         );
@@ -447,8 +447,10 @@ async fn create_bot(
     // Everyone renders the user directory; a new bot should be mentionable
     // without a reload.
     for u in st.hub.online_users() {
-        st.hub
-            .send_to_user(u, &tc_core::ServerFrame::UserUpd { user: bot.clone() });
+        st.hub.send_to_user(
+            u,
+            &tensorchat_core::ServerFrame::UserUpd { user: bot.clone() },
+        );
     }
     Ok(Json(bot))
 }
@@ -473,7 +475,7 @@ pub struct TokenRes {
     secret: Option<String>,
 }
 
-fn token_res(t: tc_store::ApiToken, secret: Option<String>) -> TokenRes {
+fn token_res(t: tensorchat_store::ApiToken, secret: Option<String>) -> TokenRes {
     TokenRes {
         id: t.id,
         label: t.label,
@@ -574,7 +576,7 @@ pub struct InviteRes {
     token: Option<String>,
 }
 
-fn invite_res(i: tc_store::Invite, token: Option<String>, now: u64) -> InviteRes {
+fn invite_res(i: tensorchat_store::Invite, token: Option<String>, now: u64) -> InviteRes {
     InviteRes {
         live: i.is_live(now),
         id: i.id,
@@ -622,7 +624,7 @@ async fn create_invite(
     let (id, hash, by) = (st.next_id(), token.hash, actor.id);
     let created = st
         .db(move |s| {
-            s.create_invite(tc_store::NewInvite {
+            s.create_invite(tensorchat_store::NewInvite {
                 id,
                 token_hash: &hash,
                 label: &label,
@@ -776,7 +778,7 @@ async fn my_notifications(
 ) -> ApiResult<Json<Vec<NotificationRes>>> {
     let uid = u.id;
     let items = st
-        .db(move |s| s.pending_notifications(uid, tc_store::MAX_NOTIFICATIONS))
+        .db(move |s| s.pending_notifications(uid, tensorchat_store::MAX_NOTIFICATIONS))
         .await?;
 
     // Titles are composed here rather than in the worker: the worker has no
@@ -912,7 +914,7 @@ async fn update_channel(
         .await?;
     st.hub.broadcast_frame(
         id,
-        &tc_core::ServerFrame::Chan {
+        &tensorchat_core::ServerFrame::Chan {
             channel: channel.clone(),
         },
     );
@@ -942,7 +944,7 @@ async fn set_muted(
     Auth(u): Auth,
     Path(id): Path<Id>,
     Json(req): Json<PinReq>,
-) -> ApiResult<Json<tc_core::ReadState>> {
+) -> ApiResult<Json<tensorchat_core::ReadState>> {
     Ok(Json(service::set_muted(&st, u.id, id, req.on).await?))
 }
 
@@ -1163,7 +1165,9 @@ async fn saved(
 ) -> ApiResult<Json<Vec<Message>>> {
     let (uid, limit) = (
         u.id,
-        q.limit.unwrap_or(50).clamp(1, tc_store::MAX_SAVED_PAGE),
+        q.limit
+            .unwrap_or(50)
+            .clamp(1, tensorchat_store::MAX_SAVED_PAGE),
     );
     Ok(Json(st.db(move |s| s.saved_messages(uid, limit)).await?))
 }
@@ -1178,7 +1182,7 @@ async fn mark_read(
     Auth(u): Auth,
     Path(id): Path<Id>,
     Json(req): Json<MarkReadReq>,
-) -> ApiResult<Json<tc_core::ReadState>> {
+) -> ApiResult<Json<tensorchat_core::ReadState>> {
     // `id` here is the channel, matching the realtime frame's shape.
     Ok(Json(service::mark_read(&st, u.id, id, req.up_to).await?))
 }
@@ -1218,7 +1222,7 @@ async fn search(
     Query(p): Query<SearchParams>,
 ) -> ApiResult<Json<Vec<SearchHit>>> {
     let uid = u.id;
-    let parsed = tc_core::query::parse(&p.q);
+    let parsed = tensorchat_core::query::parse(&p.q);
     let (param_channel, param_author, limit) = (p.channel, p.author, p.limit.unwrap_or(25));
 
     let hits = st
@@ -1267,7 +1271,7 @@ async fn upload(
     State(st): State<Shared>,
     Auth(u): Auth,
     mut form: Multipart,
-) -> ApiResult<Json<tc_core::Attachment>> {
+) -> ApiResult<Json<tensorchat_core::Attachment>> {
     let field = form
         .next_field()
         .await

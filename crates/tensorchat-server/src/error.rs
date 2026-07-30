@@ -8,7 +8,7 @@ use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
-use tc_core::ErrCode;
+use tensorchat_core::ErrCode;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ApiError {
@@ -89,9 +89,9 @@ impl IntoResponse for ApiError {
 }
 
 /// Storage errors become HTTP errors without leaking SQL.
-impl From<tc_store::Error> for ApiError {
-    fn from(e: tc_store::Error) -> Self {
-        use tc_store::Error as E;
+impl From<tensorchat_store::Error> for ApiError {
+    fn from(e: tensorchat_store::Error) -> Self {
+        use tensorchat_store::Error as E;
         match e {
             E::NotFound => ApiError::NotFound,
             E::Forbidden => ApiError::Forbidden,
@@ -152,20 +152,20 @@ mod tests {
     #[test]
     fn storage_errors_map_to_the_right_status() {
         assert_eq!(
-            ApiError::from(tc_store::Error::NotFound).status(),
+            ApiError::from(tensorchat_store::Error::NotFound).status(),
             StatusCode::NOT_FOUND
         );
         assert_eq!(
-            ApiError::from(tc_store::Error::Forbidden).status(),
+            ApiError::from(tensorchat_store::Error::Forbidden).status(),
             StatusCode::FORBIDDEN
         );
         assert_eq!(
-            ApiError::from(tc_store::Error::Conflict("that handle")).status(),
+            ApiError::from(tensorchat_store::Error::Conflict("that handle")).status(),
             StatusCode::CONFLICT
         );
         // An infrastructure failure must not be reported as the caller's fault.
         assert_eq!(
-            ApiError::from(tc_store::Error::SchemaTooNew {
+            ApiError::from(tensorchat_store::Error::SchemaTooNew {
                 found: 9,
                 supported: 1
             })

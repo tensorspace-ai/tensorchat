@@ -33,8 +33,8 @@
 
 use std::path::Path;
 
-use tc_core::{Id, IdGen, now_ms};
-use tc_store::{NewInvite, Store};
+use tensorchat_core::{Id, IdGen, now_ms};
+use tensorchat_store::{NewInvite, Store};
 
 use crate::auth;
 use crate::config::Config;
@@ -43,11 +43,11 @@ pub const HELP: &str = "\
 tensorchat — team chat that runs on one box
 
 USAGE
-  tc-server                     Run the server. This is the default.
-  tc-server invite [options]    Mint an invite link and print it once.
-  tc-server promote <handle>    Grant administrator.
-  tc-server demote <handle>     Revoke administrator.
-  tc-server help
+  tensorchat                     Run the server. This is the default.
+  tensorchat invite [options]    Mint an invite link and print it once.
+  tensorchat promote <handle>    Grant administrator.
+  tensorchat demote <handle>     Revoke administrator.
+  tensorchat help
 
 INVITE OPTIONS
   --uses N     How many accounts the link may create. 0 is unlimited.
@@ -60,8 +60,8 @@ INVITE OPTIONS
 Every command reads the same environment as the server (TC_DB and friends), so
 it acts on the same database with no extra arguments.
 
-  tc-server invite --uses 1 --days 2
-  docker compose exec tensorchat tc-server invite
+  tensorchat invite --uses 1 --days 2
+  docker compose exec tensorchat tensorchat invite
 ";
 
 /// What the process was asked to do.
@@ -104,22 +104,22 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, String>
         verb @ ("promote" | "demote") => {
             let handle = args
                 .next()
-                .ok_or_else(|| format!("{verb} needs a handle, e.g. `tc-server {verb} alice`"))?;
+                .ok_or_else(|| format!("{verb} needs a handle, e.g. `tensorchat {verb} alice`"))?;
             if let Some(extra) = args.next() {
                 return Err(format!("unexpected argument after the handle: {extra}"));
             }
             Ok(Command::SetAdmin {
                 // Normalized the same way registration normalizes it, so
                 // `@Alice` and `alice` find the same account.
-                handle: tc_core::text::normalize_handle(&handle).into_owned(),
+                handle: tensorchat_core::text::normalize_handle(&handle).into_owned(),
                 admin: verb == "promote",
             })
         }
-        // Deliberately not "assume they meant serve": a typo like `tc-server
+        // Deliberately not "assume they meant serve": a typo like `tensorchat
         // invte` would otherwise silently start a server instead of reporting
         // the mistake.
         other => Err(format!(
-            "unknown command: {other}\n\nRun `tc-server help` for usage."
+            "unknown command: {other}\n\nRun `tensorchat help` for usage."
         )),
     }
 }
@@ -159,7 +159,7 @@ fn parse_invite<I: Iterator<Item = String>>(mut args: I) -> Result<InviteArgs, S
             "--url" => out.url = Some(value()?),
             other => {
                 return Err(format!(
-                    "unknown option: {other}\n\nRun `tc-server help` for usage."
+                    "unknown option: {other}\n\nRun `tensorchat help` for usage."
                 ));
             }
         }
@@ -315,7 +315,7 @@ fn set_admin(store: &Store, handle: &str, admin: bool) -> Result<String, String>
     // Demoting the last one leaves a workspace nobody can administer through
     // the API. Allowed — this console is how you get back out — but said aloud.
     if !admin && store.admin_count().unwrap_or(1) == 0 {
-        out.push_str("\n\nThat was the last administrator. Run `tc-server promote <handle>` to appoint another.");
+        out.push_str("\n\nThat was the last administrator. Run `tensorchat promote <handle>` to appoint another.");
     }
     if user.deactivated {
         out.push_str("\n\nNote: this account is deactivated and cannot sign in until an administrator restores it.");
@@ -336,13 +336,13 @@ pub fn warn_if_unreachable(store: &Store, cfg: &Config) {
     if humans == 0 && !cfg.open_registration {
         tracing::warn!(
             "no accounts yet and registration is closed — nobody can sign in. \
-             Run `tc-server invite` to mint a link; whoever uses it first \
+             Run `tensorchat invite` to mint a link; whoever uses it first \
              becomes the administrator."
         );
     } else if admins == 0 && humans > 0 {
         tracing::warn!(
             "this workspace has no active administrator. \
-             Run `tc-server promote <handle>` to appoint one."
+             Run `tensorchat promote <handle>` to appoint one."
         );
     }
 }

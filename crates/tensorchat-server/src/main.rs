@@ -7,8 +7,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use tc_server::cli::{self, Command};
-use tc_server::{AppState, Config, Shared, build_router};
+use tensorchat_server::cli::{self, Command};
+use tensorchat_server::{AppState, Config, Shared, build_router};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cfg = Config::from_env().map_err(|e| format!("configuration error: {e}"))?;
@@ -43,7 +43,7 @@ async fn serve(cfg: Config) -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "tc_server=info,tower_http=warn".into()),
+                .unwrap_or_else(|_| "tensorchat_server=info,tower_http=warn".into()),
         )
         .compact()
         .init();
@@ -55,7 +55,7 @@ async fn serve(cfg: Config) -> Result<(), Box<dyn std::error::Error>> {
     }
     std::fs::create_dir_all(&cfg.blob_dir)?;
 
-    let store = tc_store::Store::open(&cfg.db_path)?;
+    let store = tensorchat_store::Store::open(&cfg.db_path)?;
     tracing::info!(db = %cfg.db_path.display(), "database ready");
 
     // A workspace nobody can sign in to fails silently otherwise: the server
@@ -71,7 +71,7 @@ async fn serve(cfg: Config) -> Result<(), Box<dyn std::error::Error>> {
         tracing::info!("web push disabled (TC_PUSH_CONTACT is empty)");
         None
     } else {
-        match tc_server::push::Vapid::load(&store, &cfg.push_contact) {
+        match tensorchat_server::push::Vapid::load(&store, &cfg.push_contact) {
             Ok(v) => {
                 tracing::info!("web push enabled");
                 Some(v)
@@ -120,7 +120,7 @@ fn spawn_maintenance(st: Shared) {
         tick.tick().await;
         loop {
             tick.tick().await;
-            let now = tc_core::now_ms();
+            let now = tensorchat_core::now_ms();
             let r = st
                 .db(move |s| {
                     let purged = s.purge_expired_sessions(now)?;

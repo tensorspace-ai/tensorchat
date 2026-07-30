@@ -1,5 +1,5 @@
 [package]
-name = "tc-store"
+name = "tensorchat-store"
 description = "TensorChat persistence: SQLite schema, queries, and FTS5 search. No async."
 version.workspace = true
 edition.workspace = true
@@ -17,5 +17,5 @@ r2d2 = "0.8.10"
 r2d2_sqlite = "0.35.0"
 rusqlite = { version = "0.40.1", features = ["array", "bundled", "functions"] }
 serde = "1.0.229"
-tc-core = { version = "0.1.0", path = "../tc-core" }
+tensorchat-core = { version = "0.1.0", path = "../tensorchat-core" }
 thiserror = "2.0.19"

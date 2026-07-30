@@ -1,7 +1,7 @@
 //! Channels, membership, and read state.
 
 use rusqlite::{OptionalExtension, Row, TransactionBehavior, params};
-use tc_core::{Channel, ChannelKind, Id, ReadState};
+use tensorchat_core::{Channel, ChannelKind, Id, ReadState};
 
 use crate::{Error, Result, Store, from_sql, to_sql};
 
@@ -474,7 +474,7 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tc_core::IdGen;
+    use tensorchat_core::IdGen;
 
     struct Fx {
         s: Store,

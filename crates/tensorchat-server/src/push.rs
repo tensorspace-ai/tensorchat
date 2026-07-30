@@ -30,8 +30,8 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use p256::ecdsa::signature::Signer;
 use p256::ecdsa::{Signature, SigningKey};
 use p256::elliptic_curve::sec1::ToSec1Point;
-use tc_core::Id;
-use tc_store::Store;
+use tensorchat_core::Id;
+use tensorchat_store::Store;
 
 use crate::state::Shared;
 
@@ -192,7 +192,7 @@ pub fn notify(st: &Shared, user: Id) {
     // Connected at all — even with the tab hidden — means the in-page notifier
     // already has this, and a push on top would be a duplicate buzz. The gap
     // this closes is the one where nothing is open.
-    if st.hub.presence_of(user) != tc_core::Presence::Offline {
+    if st.hub.presence_of(user) != tensorchat_core::Presence::Offline {
         return;
     }
     let Some(vapid) = st.vapid.clone() else {
@@ -207,7 +207,7 @@ pub fn notify(st: &Shared, user: Id) {
                 return;
             }
         };
-        let now = tc_core::now_ms() / 1000;
+        let now = tensorchat_core::now_ms() / 1000;
         for endpoint in endpoints {
             let outcome = deliver(&st.http, &vapid, &endpoint, now).await;
             let ep = endpoint.clone();

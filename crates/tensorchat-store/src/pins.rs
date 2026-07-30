@@ -5,7 +5,7 @@
 //! frame like any other channel event.
 
 use rusqlite::{OptionalExtension, TransactionBehavior, params};
-use tc_core::{Id, Message};
+use tensorchat_core::{Id, Message};
 
 use crate::{Error, Result, Store, to_sql};
 
@@ -118,7 +118,7 @@ impl Store {
 mod tests {
     use super::*;
     use crate::{NewChannel, NewMessage};
-    use tc_core::{ChannelKind, IdGen};
+    use tensorchat_core::{ChannelKind, IdGen};
 
     struct Fx {
         s: Store,

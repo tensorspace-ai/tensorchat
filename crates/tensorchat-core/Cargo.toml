@@ -1,5 +1,5 @@
 [package]
-name = "tc-core"
+name = "tensorchat-core"
 description = "TensorChat domain types, wire protocol, and snowflake ID generation. No I/O."
 version.workspace = true
 edition.workspace = true

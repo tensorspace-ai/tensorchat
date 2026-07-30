@@ -9,7 +9,7 @@
 //! the result set.
 
 use rusqlite::{Row, params};
-use tc_core::{Id, Message, SearchHit, model};
+use tensorchat_core::{Id, Message, SearchHit, model};
 
 use crate::{Result, Store, from_sql, to_sql, unpack_ids};
 
@@ -18,7 +18,7 @@ pub const MAX_RESULTS: u32 = 50;
 /// A parsed search request.
 ///
 /// The `from:` / `in:` / `before:` / `after:` / `has:` operators a user types
-/// are parsed by `tc_core::query` and resolved to ids by the server; by the
+/// are parsed by `tensorchat_core::query` and resolved to ids by the server; by the
 /// time a request reaches here every filter is already a concrete value.
 #[derive(Default)]
 pub struct SearchQuery<'a> {
@@ -144,7 +144,7 @@ impl Store {
         let limit = q.limit.clamp(1, MAX_RESULTS);
         let conn = self.conn()?;
 
-        // The snippet markers are the sentinels from tc_core::model, not HTML:
+        // The snippet markers are the sentinels from tensorchat_core::model, not HTML:
         // the client escapes the text first and only then converts sentinels to
         // markup, so a message body can never inject tags into its own snippet.
         //
@@ -216,7 +216,7 @@ impl Store {
 mod tests {
     use super::*;
     use crate::{NewChannel, NewMessage};
-    use tc_core::{ChannelKind, IdGen};
+    use tensorchat_core::{ChannelKind, IdGen};
 
     struct Fx {
         s: Store,
@@ -464,7 +464,7 @@ mod tests {
         assert_eq!(hits[0].message.reactions[0].count, 1);
     }
 
-    // -- Operators (parsed by tc_core::query, resolved before they get here) --
+    // -- Operators (parsed by tensorchat_core::query, resolved before they get here) --
 
     #[test]
     fn a_date_bound_excludes_messages_outside_it() {

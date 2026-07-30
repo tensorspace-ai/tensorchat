@@ -20,8 +20,8 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use tc_core::{ChannelKind, Id, IdGen};
-use tc_store::{NewChannel, NewMessage, Store};
+use tensorchat_core::{ChannelKind, Id, IdGen};
+use tensorchat_store::{NewChannel, NewMessage, Store};
 
 struct Fixture {
     store: Store,
@@ -320,7 +320,7 @@ fn a_single_use_invite_admits_exactly_one_racing_account() {
     let contenders = 8;
 
     fx.store
-        .create_invite(tc_store::NewInvite {
+        .create_invite(tensorchat_store::NewInvite {
             id: fx.ids.next(),
             token_hash: b"race",
             label: "",
@@ -344,7 +344,7 @@ fn a_single_use_invite_admits_exactly_one_racing_account() {
                     admitted.fetch_add(1, Ordering::Relaxed);
                 }
                 // Forbidden is the expected loss: the seat was already taken.
-                Err(tc_store::Error::Forbidden) => {}
+                Err(tensorchat_store::Error::Forbidden) => {}
                 Err(e) => panic!("unexpected error redeeming an invite: {e}"),
             }
         }));

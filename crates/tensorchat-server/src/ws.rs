@@ -14,7 +14,7 @@ use axum::extract::{Query, State};
 use axum::response::Response;
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
-use tc_core::{ClientFrame, ErrCode, Id, PROTOCOL_VERSION, Presence, ServerFrame, User};
+use tensorchat_core::{ClientFrame, ErrCode, Id, PROTOCOL_VERSION, Presence, ServerFrame, User};
 
 use crate::error::ApiError;
 use crate::ratelimit::ConnLimits;
@@ -56,7 +56,7 @@ pub async fn handler(
         .ok_or(ApiError::Unauthorized)?;
 
     let hash = crate::auth::token_hash(&token);
-    let now = tc_core::now_ms();
+    let now = tensorchat_core::now_ms();
     let user = st
         .db(move |s| s.session_user(&hash, now))
         .await
@@ -421,5 +421,5 @@ mod tests {
     /// A maximum-length message plus its framing must fit inside the inbound
     /// frame cap. Both are compile-time constants, so this is checked at build
     /// time rather than by running a test.
-    const _: () = assert!(MAX_FRAME_BYTES > tc_core::text::MAX_BODY_BYTES * 2);
+    const _: () = assert!(MAX_FRAME_BYTES > tensorchat_core::text::MAX_BODY_BYTES * 2);
 }

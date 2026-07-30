@@ -13,7 +13,7 @@
 //! 10,000 sockets costs one `rmp_serde` pass and 10,000 pointer bumps.
 //!
 //! This is only sound because broadcast frames are viewer-independent by
-//! construction (see `tc_core::proto`). Anything per-viewer — an `Ack`, a read
+//! construction (see `tensorchat_core::proto`). Anything per-viewer — an `Ack`, a read
 //! receipt — goes through [`Hub::send_to_user`] instead, which encodes per
 //! recipient because it must.
 //!
@@ -33,7 +33,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use bytes::Bytes;
 use dashmap::DashMap;
 use parking_lot::RwLock;
-use tc_core::{Id, Presence, ServerFrame};
+use tensorchat_core::{Id, Presence, ServerFrame};
 use tokio::sync::mpsc;
 
 /// Per-connection outbound queue depth.
@@ -227,7 +227,7 @@ impl Hub {
             // rather than dropping the connection.
             tracing::error!(error = %e, "failed to encode frame");
             ServerFrame::Err {
-                code: tc_core::ErrCode::Internal,
+                code: tensorchat_core::ErrCode::Internal,
                 msg: "encode failed".into(),
             }
             .encode()
@@ -394,7 +394,7 @@ impl Hub {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tc_core::{ErrCode, Id};
+    use tensorchat_core::{ErrCode, Id};
 
     fn frame(msg: &str) -> ServerFrame {
         ServerFrame::Err {

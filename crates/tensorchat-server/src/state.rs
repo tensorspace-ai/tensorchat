@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
-use tc_core::{Id, IdGen, User};
-use tc_store::Store;
+use tensorchat_core::{Id, IdGen, User};
+use tensorchat_store::Store;
 
 use crate::config::Config;
 use crate::error::{ApiError, ApiResult};
@@ -90,12 +90,12 @@ impl AppState {
 
     /// Run a blocking store operation on the blocking pool.
     ///
-    /// This is the **only** place `tc_store` is called from, so the "never
+    /// This is the **only** place `tensorchat_store` is called from, so the "never
     /// block a reactor thread" rule is enforced in one spot rather than
     /// remembered at every call site.
     pub async fn db<T, F>(&self, f: F) -> ApiResult<T>
     where
-        F: FnOnce(&Store) -> tc_store::Result<T> + Send + 'static,
+        F: FnOnce(&Store) -> tensorchat_store::Result<T> + Send + 'static,
         T: Send + 'static,
     {
         let store = self.store.clone();
@@ -120,7 +120,7 @@ impl FromRequestParts<Shared> for Auth {
     ) -> Result<Self, Self::Rejection> {
         let token = bearer_token(&parts.headers).ok_or(ApiError::Unauthorized)?;
         let hash = crate::auth::token_hash(&token);
-        let now = tc_core::now_ms();
+        let now = tensorchat_core::now_ms();
 
         // A session first, since interactive clients are the overwhelming
         // majority of requests; then a long-lived API token, so a bot presents

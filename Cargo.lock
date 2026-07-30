@@ -1954,7 +1954,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tc-core"
+name = "tensorchat-core"
 version = "0.1.0"
 dependencies = [
  "rmp-serde",
@@ -1964,7 +1964,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tc-server"
+name = "tensorchat-server"
 version = "0.1.0"
 dependencies = [
  "argon2",
@@ -1983,8 +1983,8 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "tc-core",
- "tc-store",
+ "tensorchat-core",
+ "tensorchat-store",
  "thiserror",
  "tokio",
  "tokio-util",
@@ -1995,14 +1995,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "tc-store"
+name = "tensorchat-store"
 version = "0.1.0"
 dependencies = [
  "r2d2",
  "r2d2_sqlite",
  "rusqlite",
  "serde",
- "tc-core",
+ "tensorchat-core",
  "thiserror",
 ]
 

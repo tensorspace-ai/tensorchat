@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 
 use rusqlite::{OptionalExtension, Row, TransactionBehavior, params, types::Value};
-use tc_core::{Attachment, Id, Message, ReactionSummary};
+use tensorchat_core::{Attachment, Id, Message, ReactionSummary};
 
 use crate::{Error, Result, Store, from_sql, pack_ids, to_sql, unpack_ids};
 
@@ -646,7 +646,7 @@ fn id_array(ids: &[Id]) -> std::rc::Rc<Vec<Value>> {
 mod tests {
     use super::*;
     use crate::NewChannel;
-    use tc_core::{ChannelKind, IdGen};
+    use tensorchat_core::{ChannelKind, IdGen};
 
     struct Fx {
         s: Store,

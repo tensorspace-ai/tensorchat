@@ -7,7 +7,7 @@
 //! instead of leaving you a private window into it.
 
 use rusqlite::params;
-use tc_core::{Id, Message};
+use tensorchat_core::{Id, Message};
 
 use crate::{Result, Store, to_sql};
 
@@ -84,7 +84,7 @@ impl Store {
 mod tests {
     use super::*;
     use crate::{NewChannel, NewMessage};
-    use tc_core::{ChannelKind, IdGen};
+    use tensorchat_core::{ChannelKind, IdGen};
 
     struct Fx {
         s: Store,

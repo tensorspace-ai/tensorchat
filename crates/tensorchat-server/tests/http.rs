@@ -13,7 +13,7 @@ use axum::body::{Body, to_bytes};
 use axum::extract::ConnectInfo;
 use axum::http::{Request, StatusCode, header};
 use serde_json::{Value, json};
-use tc_server::{AppState, Config, build_router};
+use tensorchat_server::{AppState, Config, build_router};
 use tower::ServiceExt;
 
 /// A test harness holding the router and a synthetic client address.
@@ -21,7 +21,7 @@ struct App {
     router: Router,
     /// Kept so a test can stand the router back up under a different config
     /// against the same data. See [`App::reconfigure`].
-    store: tc_store::Store,
+    store: tensorchat_store::Store,
 }
 
 impl App {
@@ -30,7 +30,7 @@ impl App {
     }
 
     fn with_config(cfg: Config) -> App {
-        let store = tc_store::Store::open_in_memory().expect("in-memory store");
+        let store = tensorchat_store::Store::open_in_memory().expect("in-memory store");
         let st = Arc::new(AppState::new(cfg, store.clone()));
         App {
             router: build_router(st),

@@ -1,5 +1,5 @@
 [package]
-name = "tc-server"
+name = "tensorchat-server"
 description = "TensorChat server: HTTP API, WebSocket hub, and authentication."
 version.workspace = true
 edition.workspace = true
@@ -11,6 +11,13 @@ authors.workspace = true
 keywords.workspace = true
 categories.workspace = true
 readme = "../../README.md"
+
+# The crate is `tensorchat-server` because `tensorchat` alone would claim the
+# name for a library that does not exist yet; the command people type is just
+# `tensorchat`.
+[[bin]]
+name = "tensorchat"
+path = "src/main.rs"
 
 [dependencies]
 argon2 = "0.5.3"
@@ -29,8 +36,8 @@ rustls = { version = "0.23.43", default-features = false, features = ["ring", "s
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sha2 = "0.11.0"
-tc-core = { version = "0.1.0", path = "../tc-core" }
-tc-store = { version = "0.1.0", path = "../tc-store" }
+tensorchat-core = { version = "0.1.0", path = "../tensorchat-core" }
+tensorchat-store = { version = "0.1.0", path = "../tensorchat-store" }
 thiserror = "2.0.19"
 tokio = { version = "1.53.1", features = ["full"] }
 tokio-util = { version = "0.7.19", features = ["io"] }

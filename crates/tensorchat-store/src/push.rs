@@ -5,7 +5,7 @@
 //! for why the encryption keys are deliberately absent.
 
 use rusqlite::{OptionalExtension, params};
-use tc_core::Id;
+use tensorchat_core::Id;
 
 use crate::{Result, Store, from_sql, to_sql};
 
@@ -202,7 +202,7 @@ impl Store {
 mod tests {
     use super::*;
     use crate::{NewChannel, NewMessage};
-    use tc_core::{ChannelKind, IdGen};
+    use tensorchat_core::{ChannelKind, IdGen};
 
     struct Fx {
         s: Store,

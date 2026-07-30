@@ -30,7 +30,7 @@ use std::path::Path;
 use r2d2::{Pool, PooledConnection};
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{Connection, TransactionBehavior};
-use tc_core::Id;
+use tensorchat_core::Id;
 
 mod channels;
 mod invites;

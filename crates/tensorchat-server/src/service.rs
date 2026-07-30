@@ -7,9 +7,9 @@
 //! — a message that persists but is never broadcast is invisible until reload,
 //! and a broadcast without a write is a message that vanishes.
 
-use tc_core::text::{self, Mention};
-use tc_core::{Channel, ChannelKind, Id, Message, ReadState, ServerFrame, User, now_ms};
-use tc_store::{NewChannel, NewMessage};
+use tensorchat_core::text::{self, Mention};
+use tensorchat_core::{Channel, ChannelKind, Id, Message, ReadState, ServerFrame, User, now_ms};
+use tensorchat_store::{NewChannel, NewMessage};
 
 use crate::error::{ApiError, ApiResult};
 use crate::state::Shared;
@@ -114,7 +114,7 @@ async fn push_for(st: &Shared, author: Id, channel: Id, mentions: &[Id]) {
     let kind = st.db(move |s| s.channel(channel)).await.map(|c| c.kind);
     if matches!(
         kind,
-        Ok(tc_core::ChannelKind::Dm | tc_core::ChannelKind::Group)
+        Ok(tensorchat_core::ChannelKind::Dm | tensorchat_core::ChannelKind::Group)
     ) && let Ok(members) = st.db(move |s| s.members(channel)).await
     {
         targets.extend(members);

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/tc-core", "crates/tc-store", "crates/tc-server"]
+members = ["crates/tensorchat-core", "crates/tensorchat-store", "crates/tensorchat-server"]
 
 [workspace.package]
 version = "0.1.0"

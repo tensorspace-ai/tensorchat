@@ -13,7 +13,7 @@
 //! [`Store::create_user_via_invite`].
 
 use rusqlite::{OptionalExtension, TransactionBehavior, params};
-use tc_core::{Id, User};
+use tensorchat_core::{Id, User};
 
 use crate::{Error, Result, Store, from_sql, to_sql};
 
@@ -243,7 +243,7 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tc_core::IdGen;
+    use tensorchat_core::IdGen;
 
     fn fx() -> (Store, IdGen, Id) {
         let s = Store::open_in_memory().unwrap();
