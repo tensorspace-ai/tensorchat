@@ -122,6 +122,27 @@ Nothing else is needed — no migration step to run, no services to start. Later
 upgrades apply their schema changes on startup, so deploying a new version is
 still just restarting the binary.
 
+### From crates.io
+
+```sh
+cargo install tensorchat-server
+```
+
+That installs the `tensorchat` command. It does not install a frontend: the web
+client is built by Node, and shipping a compiled bundle inside a source crate
+would put an artifact nobody can audit into your dependency tree. Build it from
+a checkout and point the server at it:
+
+```sh
+git clone https://github.com/tensorspace-ai/tensorchat
+cd tensorchat/web && npm install && npm run build && cd ../..
+TC_WEB=tensorchat/web/dist tensorchat
+```
+
+If you only want the API — a bot, a bridge, an integration — skip that and set
+`TC_WEB` to any empty directory. For an actual chat deployment, prefer the
+Docker image or a release archive below; both come with the frontend in place.
+
 ### With Docker
 
 ```sh
