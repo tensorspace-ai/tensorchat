@@ -395,3 +395,6 @@ Release notes are in [`CHANGELOG.md`](CHANGELOG.md).
 ## License
 
 [MIT](LICENSE) © TensorSpace, Inc.
+
+Provided as is, without warranty of any kind, as the license sets out. It is
+pre-1.0 software that stores other people's messages — keep your own backups.

@@ -60,17 +60,20 @@ representative at an online or offline event.
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported to the community leaders responsible for enforcement at
-<conduct@tensorspace.ai>.
+<support@tensorspace.ai>.
 
-All complaints will be reviewed and investigated promptly and fairly.
+Reports are reviewed as community leaders are available; no response time is
+promised.
 
-All community leaders are obligated to respect the privacy and security of the
-reporter of any incident.
+Community leaders aim to respect the privacy and security of the reporter of any
+incident.
 
 ## Enforcement Guidelines
 
-Community leaders will follow these Community Impact Guidelines in determining
-the consequences for any action they deem in violation of this Code of Conduct:
+These are the Community Impact Guidelines community leaders draw on in
+determining the consequences for any action they deem in violation of this Code
+of Conduct. They are not a sequence anyone is entitled to; which one applies
+depends on the severity of the behaviour:
 
 ### 1. Correction
 

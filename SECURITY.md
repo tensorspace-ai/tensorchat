@@ -3,7 +3,9 @@
 ## Supported versions
 
 TensorChat is pre-1.0. Security fixes land on the latest release only; there are
-no backported patch branches yet.
+no backported patch branches yet. No version carries a support commitment, and
+the software is provided as is, without warranty, as the [LICENSE](LICENSE) sets
+out — nothing on this page changes that.
 
 | Version | Supported |
 | --- | --- |
@@ -16,7 +18,7 @@ no backported patch branches yet.
 
 Report it privately through
 [GitHub Security Advisories](https://github.com/tensorspace-ai/tensorchat/security/advisories/new),
-or by email to <security@tensorspace.ai>.
+or by email to <support@tensorspace.ai>.
 
 Please include:
 
@@ -25,10 +27,12 @@ Please include:
 - The version or commit you tested.
 - Any proof-of-concept you have.
 
-You can expect an acknowledgement within 3 business days and an assessment
-within 10. If the report is confirmed, we will keep you updated as the fix is
-developed, credit you in the advisory and changelog unless you prefer otherwise,
-and coordinate disclosure timing with you.
+This is a small project with no staffed security team, so no response time is
+promised. Reports are read and triaged as maintainers are available. Where one
+is agreed to be a vulnerability, the aim is to fix it before it is described
+publicly and to coordinate timing with the reporter, who is credited in the
+advisory and changelog unless they ask not to be. None of this is a commitment
+or a term of service; it describes intent.
 
 ## What is in scope
 
