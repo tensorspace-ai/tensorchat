@@ -1,0 +1,7 @@
+# Review falls to the maintainers by default.
+*       @tensorspace-ai/maintainers
+
+# The wire protocol and the store: a change here reaches every connected client
+# and every row already written.
+/crates/tensorchat-core/    @tensorspace-ai/maintainers
+/crates/tensorchat-store/   @tensorspace-ai/maintainers

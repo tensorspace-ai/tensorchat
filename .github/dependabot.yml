@@ -25,6 +25,13 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    # `dtolnay/rust-toolchain@1.95.0` is an MSRV pin wearing an action version.
+    # Dependabot read it as one and opened a PR moving it to 1.100.0, which is
+    # the job that exists to enforce the floor declared in Cargo.toml. That PR
+    # failed only because the version does not exist yet; a real one would have
+    # gone green while testing a toolchain nothing claims to support.
+    ignore:
+      - dependency-name: dtolnay/rust-toolchain
     groups:
       actions:
         patterns: ["*"]

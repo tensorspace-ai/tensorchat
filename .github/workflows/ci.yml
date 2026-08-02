@@ -104,3 +104,16 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # Advisories are one question; what a shipped binary is allowed to carry is
+  # another. This covers the licence allow-list and refuses a dependency from
+  # anywhere but crates.io.
+  deny:
+    name: rust / licences and advisories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories licenses bans sources
