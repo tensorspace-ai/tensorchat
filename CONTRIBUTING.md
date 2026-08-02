@@ -27,21 +27,16 @@ cargo run -p tensorchat-server
 
 ## Before you open a pull request
 
-Everything CI checks, you can run locally:
+Everything CI checks, in one script:
 
 ```sh
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-
-cd web
-npm test
-npx tsc --noEmit
-npm run build
+./run-tests.sh
 ```
 
-CI runs exactly these on Linux and macOS. A pull request that fails any of them
-will not be reviewed until it is green.
+It runs `cargo fmt --check`, clippy with warnings denied, the Rust suite, then
+the web client's type check, tests and build — the same checks CI runs on Linux
+and macOS, in the same order. A pull request that fails any of them will not be
+reviewed until it is green.
 
 ## What makes a change easy to accept
 
