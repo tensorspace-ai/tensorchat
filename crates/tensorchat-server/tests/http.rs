@@ -515,6 +515,72 @@ async fn deactivating_an_account_ends_its_sessions_and_blocks_login() {
     assert_eq!(status, StatusCode::OK);
 }
 
+/// A misspelled field used to deserialize to "not supplied", so the handler
+/// answered success having done nothing — or, where the field had a default,
+/// having done the opposite of what was asked.
+#[tokio::test]
+async fn a_misspelled_field_is_refused_rather_than_treated_as_absent() {
+    let app = App::new();
+    let (alice, _) = app.account("alice").await;
+    let (_bob, bob_id) = app.account("bob").await;
+
+    // 200 with the account still live is the worst of these: an operator
+    // locking out a compromised account was told it worked.
+    let (status, _) = app
+        .send(
+            "PATCH",
+            &format!("/api/admin/users/{bob_id}"),
+            Some(&alice),
+            Some(json!({ "deactivate": true })),
+        )
+        .await;
+    assert_ne!(status, StatusCode::OK, "a typo must not read as success");
+
+    let (status, user) = app.send("GET", "/api/me", Some(&alice), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(user["h"], "alice", "and must not have changed anything");
+
+    // camelCase is what an untuned HTTP client emits, and these two carry
+    // defaults — so the invite was minted single-use and week-long instead.
+    let (status, _) = app
+        .send(
+            "POST",
+            "/api/admin/invites",
+            Some(&alice),
+            Some(json!({ "maxUses": 100, "expiresInHours": 720 })),
+        )
+        .await;
+    assert_ne!(
+        status,
+        StatusCode::OK,
+        "camelCase must not silently default"
+    );
+}
+
+/// Query parameters go through a different deserializer than JSON bodies, so
+/// the same guarantee needs its own check: an unknown one used to widen a
+/// search rather than narrow it.
+#[tokio::test]
+async fn a_misspelled_query_parameter_is_refused() {
+    let app = App::new();
+    let (alice, _) = app.account("alice").await;
+
+    let (status, _) = app
+        .send("GET", "/api/search?q=hello&chanel=1", Some(&alice), None)
+        .await;
+    assert_ne!(
+        status,
+        StatusCode::OK,
+        "an unknown filter must not be dropped"
+    );
+
+    // The correctly spelled one still works.
+    let (status, _) = app
+        .send("GET", "/api/search?q=hello", Some(&alice), None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
 #[tokio::test]
 async fn an_administrator_cannot_lock_the_workspace_out_of_itself() {
     let app = App::new();

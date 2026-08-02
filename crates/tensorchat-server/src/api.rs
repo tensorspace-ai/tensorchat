@@ -86,9 +86,23 @@ pub fn routes() -> Router<Shared> {
         .route("/healthz", get(health))
 }
 
+// Every request and query type below refuses a field it does not define.
+//
+// Serde drops unknown fields by default, and most of these types pair that with
+// an `Option` or a `#[serde(default)]` — so a misspelled field deserialized to
+// "not supplied" and the handler returned success having done nothing, or
+// having done the default instead. `{"deactivate": true}` answered 200 with the
+// account still live; `{"off": true}` on a pin answered 204 having re-asserted
+// the pin the caller meant to remove; `maxUses` on an invite, which is what a
+// camelCase client emits, quietly minted a single-use link.
+//
+// A caller cannot tell any of those from success. Refusing the field is the
+// only answer that distinguishes them.
+
 // ---------------------------------------------------------------- auth
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RegisterReq {
     handle: String,
     display_name: Option<String>,
@@ -192,6 +206,7 @@ async fn register(
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LoginReq {
     handle: String,
     password: String,
@@ -241,6 +256,7 @@ async fn logout(State(st): State<Shared>, headers: HeaderMap) -> ApiResult<Statu
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ChangePasswordReq {
     current_password: String,
     new_password: String,
@@ -314,6 +330,7 @@ async fn me(Auth(user): Auth) -> Json<User> {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UpdateMeReq {
     display_name: Option<String>,
     status: Option<String>,
@@ -358,6 +375,7 @@ async fn list_users(State(st): State<Shared>, Auth(_): Auth) -> ApiResult<Json<V
 // ---------------------------------------------------------------- admin
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdminUpdateUserReq {
     /// Grant or revoke administrator.
     admin: Option<bool>,
@@ -417,6 +435,7 @@ async fn admin_update_user(
 // ---------------------------------------------------------------- bots
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CreateBotReq {
     handle: String,
     display_name: Option<String>,
@@ -486,6 +505,7 @@ fn token_res(t: tensorchat_store::ApiToken, secret: Option<String>) -> TokenRes 
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CreateTokenReq {
     /// What the token is for, so a stale one is identifiable a year later.
     label: String,
@@ -547,6 +567,7 @@ async fn revoke_bot_token(
 const MAX_INVITE_HOURS: u64 = 24 * 366;
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CreateInviteReq {
     /// What the link is for, so a stale one is identifiable months later.
     #[serde(default)]
@@ -708,6 +729,7 @@ async fn push_key(State(st): State<Shared>, Auth(_): Auth) -> Json<PushKeyRes> {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PushSubscribeReq {
     endpoint: String,
 }
@@ -854,6 +876,7 @@ async fn browse_channels(State(st): State<Shared>, Auth(_): Auth) -> ApiResult<J
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CreateChannelReq {
     name: String,
     #[serde(default)]
@@ -880,6 +903,7 @@ async fn create_channel(
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UpdateChannelReq {
     name: Option<String>,
     topic: Option<String>,
@@ -961,6 +985,7 @@ async fn channel_members(
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AddMembersReq {
     users: Vec<Id>,
 }
@@ -992,6 +1017,7 @@ async fn remove_member(
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct OpenDmReq {
     users: Vec<Id>,
 }
@@ -1007,6 +1033,7 @@ async fn open_dm(
 // ---------------------------------------------------------------- messages
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HistoryQuery {
     /// Exclusive cursor: return messages older than this id.
     before: Option<Id>,
@@ -1044,6 +1071,7 @@ async fn history(
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PostMessageReq {
     body: String,
     #[serde(default)]
@@ -1064,6 +1092,7 @@ async fn post_message(
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EditReq {
     body: String,
 }
@@ -1087,6 +1116,7 @@ async fn delete_message(
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ReactReq {
     emoji: String,
     #[serde(default = "yes")]
@@ -1108,6 +1138,7 @@ async fn react(
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PinReq {
     #[serde(default = "yes")]
     on: bool,
@@ -1150,6 +1181,7 @@ async fn set_saved(
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SavedQuery {
     limit: Option<u32>,
 }
@@ -1173,6 +1205,7 @@ async fn saved(
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MarkReadReq {
     up_to: Id,
 }
@@ -1199,6 +1232,7 @@ async fn thread(
 // ---------------------------------------------------------------- search
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SearchParams {
     q: String,
     channel: Option<Id>,
