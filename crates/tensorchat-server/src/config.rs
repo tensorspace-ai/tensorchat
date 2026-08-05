@@ -45,6 +45,54 @@ pub struct Config {
     /// Push services want somewhere to complain to; setting it to an empty
     /// string switches Web Push off entirely.
     pub push_contact: String,
+    /// An external OpenID Connect provider people may sign in through.
+    /// `None` — the default — leaves the server exactly as it was, with
+    /// passwords the only way in.
+    pub oidc: Option<OidcConfig>,
+}
+
+/// Settings for signing in through an external OpenID Connect provider.
+///
+/// Either all of it is configured or none of it is. A half-configured provider
+/// is a button that only fails once the user has already been bounced to
+/// somebody else's login page, so the missing pieces are a startup error
+/// instead.
+#[derive(Clone)]
+pub struct OidcConfig {
+    /// Issuer URL, without a trailing slash. Endpoints are discovered from
+    /// `{issuer}/.well-known/openid-configuration` rather than configured
+    /// one by one — that document is the part of OIDC every provider
+    /// implements, and it keeps this vendor-neutral.
+    pub issuer: String,
+    pub client_id: String,
+    pub client_secret: String,
+    /// Where the provider sends the browser back to. Configured rather than
+    /// derived from the request, because a redirect URI assembled from the
+    /// `Host` header is one proxy misconfiguration away from sending
+    /// authorization codes somewhere else — and because this has to match what
+    /// was registered with the provider exactly, so it should be the same
+    /// string in both places.
+    pub redirect_url: String,
+    /// Space-separated scopes. `openid` is what makes it an OIDC request at
+    /// all; `profile` is what carries a username worth naming an account after.
+    pub scopes: String,
+    /// What the sign-in button calls this provider.
+    pub label: String,
+}
+
+/// Redact the secret. `Config` is `Debug` and gets logged at startup; a client
+/// secret in the log is a client secret in the log aggregator.
+impl std::fmt::Debug for OidcConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OidcConfig")
+            .field("issuer", &self.issuer)
+            .field("client_id", &self.client_id)
+            .field("client_secret", &"<redacted>")
+            .field("redirect_url", &self.redirect_url)
+            .field("scopes", &self.scopes)
+            .field("label", &self.label)
+            .finish()
+    }
 }
 
 impl Default for Config {
@@ -65,6 +113,7 @@ impl Default for Config {
             // it, and a self-hosted instance should not need configuration to
             // get notifications working.
             push_contact: "mailto:admin@localhost".to_string(),
+            oidc: None,
         }
     }
 }
@@ -120,8 +169,108 @@ impl Config {
             }
             c.push_contact = v;
         }
+        c.oidc = OidcConfig::from_env()?;
         Ok(c)
     }
+}
+
+impl OidcConfig {
+    /// Read the provider settings, or `None` when `TC_OIDC_ISSUER` is unset.
+    fn from_env() -> Result<Option<OidcConfig>, String> {
+        let Some(issuer) = non_empty("TC_OIDC_ISSUER") else {
+            return Ok(None);
+        };
+        // A trailing slash here becomes a double slash in the discovery URL,
+        // which some providers 404.
+        let issuer = issuer.trim_end_matches('/').to_string();
+        require_web_url("TC_OIDC_ISSUER", &issuer)?;
+
+        let client_id =
+            non_empty("TC_OIDC_CLIENT_ID").ok_or("TC_OIDC_CLIENT_ID: required when OIDC is on")?;
+        let client_secret = non_empty("TC_OIDC_CLIENT_SECRET")
+            .ok_or("TC_OIDC_CLIENT_SECRET: required when OIDC is on")?;
+        let redirect_url = non_empty("TC_OIDC_REDIRECT_URL")
+            .ok_or("TC_OIDC_REDIRECT_URL: required when OIDC is on")?;
+        require_web_url("TC_OIDC_REDIRECT_URL", &redirect_url)?;
+
+        let scopes = non_empty("TC_OIDC_SCOPES").unwrap_or_else(|| "openid profile".to_string());
+        if !scopes.split_whitespace().any(|s| s == "openid") {
+            return Err("TC_OIDC_SCOPES: must include `openid`".into());
+        }
+        // Naming the host is a better default than naming no one: "Sign in with
+        // git.example.com" tells a user where they are about to be sent.
+        let label = non_empty("TC_OIDC_LABEL")
+            .unwrap_or_else(|| host_of(&issuer).unwrap_or("your provider").to_string());
+
+        Ok(Some(OidcConfig {
+            issuer,
+            client_id,
+            client_secret,
+            redirect_url,
+            scopes,
+            label,
+        }))
+    }
+}
+
+/// A set, non-blank environment variable, trimmed.
+///
+/// Unset and empty mean the same thing throughout: `TC_OIDC_ISSUER=` in a
+/// compose file is how an operator turns the feature off without deleting the
+/// line.
+fn non_empty(key: &str) -> Option<String> {
+    let v = std::env::var(key).ok()?;
+    let v = v.trim();
+    (!v.is_empty()).then(|| v.to_string())
+}
+
+/// Require an absolute `http`/`https` URL, and require `https` unless it points
+/// at this machine.
+///
+/// The whole flow rests on TLS: the authorization code, the client secret and
+/// the access token all cross this connection, and the ID token's signature is
+/// deliberately not checked because TLS is doing that job (OIDC Core §3.1.3.7).
+/// Plain `http` to a loopback address is the exception every OAuth
+/// implementation makes, because that traffic never leaves the host — it is how
+/// anyone develops against a provider running next to them.
+fn require_web_url(key: &str, url: &str) -> Result<(), String> {
+    let (scheme, host) = scheme_and_host(url).ok_or_else(|| {
+        format!("{key}: expected an absolute http:// or https:// URL, got {url:?}")
+    })?;
+    if scheme == "http" && !is_loopback_host(host) {
+        return Err(format!(
+            "{key}: refusing plain http to {host:?} — use https, or a loopback address for local development"
+        ));
+    }
+    Ok(())
+}
+
+/// Split an absolute web URL into its scheme and bare host.
+fn scheme_and_host(url: &str) -> Option<(&str, &str)> {
+    let (scheme, rest) = url.split_once("://")?;
+    if !matches!(scheme, "http" | "https") {
+        return None;
+    }
+    let authority = rest.split(['/', '?', '#']).next()?;
+    // Userinfo first, or `user@host` would be read as a host of `user`.
+    let authority = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    let host = match authority.strip_prefix('[') {
+        // An IPv6 literal's colons are not a port separator.
+        Some(rest) => rest.split_once(']')?.0,
+        None => authority.split(':').next()?,
+    };
+    (!host.is_empty()).then_some((scheme, host))
+}
+
+fn host_of(url: &str) -> Option<&str> {
+    scheme_and_host(url).map(|(_, host)| host)
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
 }
 
 fn parse_bool(v: &str) -> Option<bool> {
@@ -145,6 +294,81 @@ mod tests {
             assert_eq!(parse_bool(f), Some(false), "{f:?}");
         }
         assert_eq!(parse_bool("maybe"), None);
+    }
+
+    #[test]
+    fn splits_urls_into_scheme_and_host() {
+        assert_eq!(
+            scheme_and_host("https://git.example.com/path?q=1#f"),
+            Some(("https", "git.example.com"))
+        );
+        assert_eq!(
+            scheme_and_host("http://127.0.0.1:3000"),
+            Some(("http", "127.0.0.1"))
+        );
+        // The colons inside an IPv6 literal are not a port separator, and
+        // userinfo is not a host.
+        assert_eq!(
+            scheme_and_host("http://[::1]:3000/x"),
+            Some(("http", "::1"))
+        );
+        assert_eq!(
+            scheme_and_host("https://user@example.com/"),
+            Some(("https", "example.com"))
+        );
+
+        for bad in [
+            "example.com",
+            "ftp://example.com",
+            // `javascript:` and friends must not survive as a redirect target.
+            "javascript://example.com",
+            "https://",
+        ] {
+            assert_eq!(scheme_and_host(bad), None, "{bad:?} should not parse");
+        }
+    }
+
+    #[test]
+    fn plain_http_is_allowed_only_to_this_machine() {
+        // The flow's confidentiality rests on TLS, so http off-box is refused
+        // rather than warned about.
+        require_web_url("X", "https://git.example.com").unwrap();
+        require_web_url("X", "http://localhost:3000").unwrap();
+        require_web_url("X", "http://127.0.0.1:3000").unwrap();
+        require_web_url("X", "http://[::1]:3000").unwrap();
+
+        let err = require_web_url("X", "http://git.example.com").unwrap_err();
+        assert!(err.contains("refusing plain http"), "{err}");
+        assert!(require_web_url("X", "not a url").is_err());
+    }
+
+    #[test]
+    fn a_loopback_lookalike_is_not_loopback() {
+        // `localhost.example.com` is somebody else's domain, and `127.0.0.1.evil`
+        // is not an address at all.
+        assert!(is_loopback_host("localhost") && is_loopback_host("LOCALHOST"));
+        assert!(is_loopback_host("127.0.0.1") && is_loopback_host("127.9.9.9"));
+        assert!(!is_loopback_host("localhost.example.com"));
+        assert!(!is_loopback_host("127.0.0.1.evil.net"));
+        assert!(!is_loopback_host("example.com"));
+    }
+
+    #[test]
+    fn the_client_secret_stays_out_of_the_debug_output() {
+        let cfg = OidcConfig {
+            issuer: "https://git.example.com".into(),
+            client_id: "id".into(),
+            client_secret: "hunter2-the-real-secret".into(),
+            redirect_url: "https://chat.example.com/api/oauth/callback".into(),
+            scopes: "openid profile".into(),
+            label: "git.example.com".into(),
+        };
+        let shown = format!("{cfg:?}");
+        assert!(
+            !shown.contains("hunter2"),
+            "the secret reached a log line: {shown}"
+        );
+        assert!(shown.contains("<redacted>"));
     }
 
     #[test]
