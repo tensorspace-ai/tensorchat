@@ -10,6 +10,7 @@ pub mod cli;
 pub mod config;
 pub mod error;
 pub mod hub;
+pub mod oidc;
 pub mod push;
 pub mod ratelimit;
 pub mod service;
@@ -48,6 +49,7 @@ pub fn build_router(st: Shared) -> Router {
 
     let mut app = Router::new()
         .merge(api::routes())
+        .merge(oidc::routes())
         .route("/ws", get(ws::handler))
         // Asset filenames are content-hashed at build time, so they are safe to
         // cache forever; everything else revalidates.

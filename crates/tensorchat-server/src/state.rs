@@ -22,8 +22,13 @@ pub struct AppState {
     /// VAPID identity for Web Push. `None` when push is switched off, which is
     /// what makes every push code path a no-op rather than a special case.
     pub vapid: Option<crate::push::Vapid>,
-    /// Outbound client, for pushes. Held rather than built per request: it is
-    /// the connection pool, and the TLS session cache with it.
+    /// The external identity provider, when one is configured. `None` leaves
+    /// every OIDC route answering 404, so an unconfigured server has no extra
+    /// surface rather than a disabled one.
+    pub oidc: Option<crate::oidc::Oidc>,
+    /// Outbound client, for pushes and for the OIDC token and userinfo calls.
+    /// Held rather than built per request: it is the connection pool, and the
+    /// TLS session cache with it.
     pub http: reqwest::Client,
     pub started: std::time::Instant,
 }
@@ -52,8 +57,10 @@ impl AppState {
         install_crypto_provider();
         let node = cfg.node_id;
         let (burst, rate) = (cfg.auth_burst, cfg.auth_per_second);
+        let oidc = cfg.oidc.clone().map(crate::oidc::Oidc::new);
         AppState {
             cfg,
+            oidc,
             store,
             hub: Hub::new(),
             ids: IdGen::new(node),

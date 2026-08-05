@@ -124,6 +124,19 @@ pub struct SessionRes {
 /// entire mitigation for a stolen session via XSS. `SameSite=Lax` blocks
 /// cross-site use while still allowing normal top-level navigation.
 fn session_response(token: String, user: User, secure: bool) -> Response {
+    let mut headers = HeaderMap::new();
+    if let Ok(v) = header::HeaderValue::from_str(&session_cookie(&token, secure)) {
+        headers.insert(header::SET_COOKIE, v);
+    }
+    (headers, Json(SessionRes { token, user })).into_response()
+}
+
+/// The `Set-Cookie` value that establishes a session.
+///
+/// Split out from [`session_response`] because the OIDC callback ends in a
+/// redirect rather than a JSON body, and the two must not drift into setting
+/// the same cookie with different attributes.
+pub(crate) fn session_cookie(token: &str, secure: bool) -> String {
     let mut cookie = format!(
         "tc_session={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age={}",
         auth::SESSION_TTL_MS / 1000
@@ -131,11 +144,7 @@ fn session_response(token: String, user: User, secure: bool) -> Response {
     if secure {
         cookie.push_str("; Secure");
     }
-    let mut headers = HeaderMap::new();
-    if let Ok(v) = header::HeaderValue::from_str(&cookie) {
-        headers.insert(header::SET_COOKIE, v);
-    }
-    (headers, Json(SessionRes { token, user })).into_response()
+    cookie
 }
 
 /// Create an account.
