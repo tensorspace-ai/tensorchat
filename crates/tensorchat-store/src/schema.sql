@@ -61,6 +61,28 @@ CREATE TABLE api_tokens (
 CREATE UNIQUE INDEX api_tokens_id ON api_tokens (id);
 CREATE INDEX api_tokens_by_user ON api_tokens (user_id);
 
+-- Accounts reachable through an external OpenID Connect provider.
+--
+-- Keyed on (issuer, subject), never on an email address: the subject is the one
+-- claim OIDC promises is stable and unique within an issuer, and an address that
+-- a provider lets someone set unverified — or releases and reassigns — would be
+-- a route into an existing account. There is deliberately no email column to
+-- match on. The issuer is half the key because subjects only have to be unique
+-- within one.
+--
+-- No provider tokens are kept. The access token is spent once during the
+-- callback to read the subject and is then dropped; what remains is an ordinary
+-- local session.
+CREATE TABLE oidc_identities (
+    issuer     TEXT    NOT NULL,
+    subject    TEXT    NOT NULL,
+    user_id    INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (issuer, subject)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX oidc_identities_by_user ON oidc_identities (user_id);
+
 -- Invite links. The middle setting between "anyone with the URL can register"
 -- and "nobody can, provision accounts by hand": registration stays closed, and
 -- an administrator admits exactly the people they meant to.

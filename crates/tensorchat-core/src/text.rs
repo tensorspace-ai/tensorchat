@@ -96,6 +96,39 @@ pub fn normalize_handle(raw: &str) -> Cow<'_, str> {
     }
 }
 
+/// Derive a handle from whatever an external identity provider calls someone.
+///
+/// Providers are not bound by our rules. `preferred_username` is commonly an
+/// email address, and may carry capitals, spaces, accents, or characters that
+/// would make `@mention` parsing ambiguous — so this is a *derivation*, not a
+/// validation: unusable characters are dropped and the result is checked, and
+/// the caller is expected to number it if it collides with an existing account.
+///
+/// An address is cut at the `@`. `alice@example.com` becoming `aliceexample.com`
+/// helps nobody, and the local part is the name the person actually goes by.
+///
+/// Returns `None` when nothing usable survives — an all-emoji display name, or
+/// one that reduces to a reserved word. The caller supplies a generic base
+/// rather than this inventing one, because it is the caller that knows what a
+/// sensible fallback looks like.
+pub fn handle_from_external(raw: &str) -> Option<String> {
+    let local = raw.split('@').next().unwrap_or(raw);
+    let mut h: String = local
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '_' | '.' | '-'))
+        .collect();
+
+    h.truncate(MAX_HANDLE_LEN);
+    let h = h.trim_matches(['.', '-', '_']).to_string();
+
+    // Run the real rules over the result rather than trusting the filter above
+    // to have covered them. Reserved words are the case that matters: a
+    // provider account called `here` must not become `@here`.
+    validate_handle(&h).ok().map(|()| h)
+}
+
 /// A handle must be usable in `@mention` syntax without ambiguity, which is
 /// exactly the character class [`scan_mentions`] recognizes.
 pub fn validate_handle(h: &str) -> Result<(), &'static str> {
@@ -211,6 +244,54 @@ mod tests {
         assert!(validate_handle("here").is_err(), "reserved");
         assert!(validate_handle("-nope").is_err());
         assert!(validate_handle("").is_err());
+    }
+
+    #[test]
+    fn derives_a_usable_handle_from_a_provider_name() {
+        assert_eq!(handle_from_external("Alice"), Some("alice".into()));
+        // An address is the local part, not the whole string with the @ removed.
+        assert_eq!(
+            handle_from_external("alice.smith@example.com"),
+            Some("alice.smith".into())
+        );
+        assert_eq!(handle_from_external(" Bob Jones "), Some("bobjones".into()));
+        assert_eq!(handle_from_external("a.b-c_1"), Some("a.b-c_1".into()));
+
+        // Truncation must not leave a trailing separator, which is a handle the
+        // rules reject.
+        let long = format!("{}.tail", "a".repeat(31));
+        let derived = handle_from_external(&long).unwrap();
+        assert_eq!(derived, "a".repeat(31));
+        validate_handle(&derived).unwrap();
+
+        // Nothing usable survives.
+        assert_eq!(handle_from_external("🎉🎉"), None);
+        assert_eq!(handle_from_external(""), None);
+        assert_eq!(handle_from_external("..."), None);
+        // A provider account named `here` must not become `@here`.
+        assert_eq!(handle_from_external("here"), None);
+        assert_eq!(handle_from_external("Everyone"), None);
+    }
+
+    #[test]
+    fn a_derived_handle_always_passes_the_real_rules() {
+        // The filter and the validator must not disagree; anything this returns
+        // is about to be inserted as an account.
+        for raw in [
+            "Alice",
+            "alice@example.com",
+            "ALICE SMITH",
+            "-alice-",
+            "...alice...",
+            "a",
+            "9",
+            "José Müller",
+            &"x".repeat(200),
+        ] {
+            if let Some(h) = handle_from_external(raw) {
+                validate_handle(&h).unwrap_or_else(|e| panic!("{raw:?} derived {h:?}: {e}"));
+            }
+        }
     }
 
     #[test]

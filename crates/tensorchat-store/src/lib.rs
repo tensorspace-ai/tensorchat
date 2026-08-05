@@ -50,9 +50,10 @@ pub use push::{MAX_NOTIFICATIONS, NotificationItem, PushSubscription};
 pub use saved::MAX_SAVED_PAGE;
 pub use search::SearchQuery;
 pub use tokens::ApiToken;
+pub use users::OidcLogin;
 
 /// Schema version embedded in the database via `PRAGMA user_version`.
-const SCHEMA_VERSION: i32 = 9;
+const SCHEMA_VERSION: i32 = 10;
 
 /// Incremental upgrades, each paired with the version it produces.
 ///
@@ -82,6 +83,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
         9,
         include_str!("migrations/009_invite_creator_optional.sql"),
     ),
+    (10, include_str!("migrations/010_oidc_identities.sql")),
 ];
 
 pub type Result<T> = std::result::Result<T, Error>;
