@@ -9,7 +9,7 @@ web client with no framework.
 
 The goal is Slack's core, built so that a small deployment costs almost
 nothing and a large one degrades gracefully: a single binary, a single SQLite
-file, ~90 kB of JavaScript (31 kB gzipped) with no framework and no runtime
+file, ~92 kB of JavaScript (32 kB gzipped) with no framework and no runtime
 dependencies, and a realtime path that does one serialization per event rather
 than one per recipient.
 
@@ -373,7 +373,7 @@ than reporting its own backlog as server loss.
 ## Testing
 
 ```sh
-cargo test --workspace     # 304 tests
+cargo test --workspace     # 336 tests
 cd web && npm test         # 164 tests
 cd web && npx tsc --noEmit # type check
 ```

@@ -139,6 +139,32 @@ jobs:
             --verify-tag \
             artifacts/*
 
+  # Deliberately last, and deliberately gated on the GitHub release: crates.io
+  # cannot be undone, so it runs only once the binaries and the release exist.
+  # If an earlier job fails there is still a version number left unspent.
+  #
+  # The order is the dependency order — core, then store, then server — because
+  # each has to be on the registry before the next one can resolve it.
+  # `--no-verify` is not used: the whole point is to build what was packaged.
+  crates-io:
+    name: publish to crates.io
+    needs: release
+    runs-on: ubuntu-latest
+    environment: crates-io
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # One invocation rather than three: cargo then publishes in dependency
+      # order itself and waits for each crate to appear in the index, which
+      # three separate commands would race.
+      - run: cargo publish --locked -p tensorchat-core -p tensorchat-store -p tensorchat-server
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
   image:
     name: publish image
     needs: web

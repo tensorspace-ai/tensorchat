@@ -17,5 +17,5 @@ r2d2 = "0.8.10"
 r2d2_sqlite = "0.35.0"
 rusqlite = { version = "0.40.1", features = ["array", "bundled", "functions"] }
 serde = "1.0.229"
-tensorchat-core = { version = "0.2.0", path = "../tensorchat-core" }
+tensorchat-core = { version = "0.3.0", path = "../tensorchat-core" }
 thiserror = "2.0.19"

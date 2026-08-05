@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-08-05
+
 ### Added
 
 - **Single sign-on through an OpenID Connect provider.** Set `TC_OIDC_ISSUER`
@@ -190,6 +192,7 @@ Initial release.
   a Content-Security-Policy with no `unsafe-inline`, and a content-type
   allowlist for uploads.
 
-[Unreleased]: https://github.com/tensorspace-ai/tensorchat/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/tensorspace-ai/tensorchat/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/tensorspace-ai/tensorchat/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/tensorspace-ai/tensorchat/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/tensorspace-ai/tensorchat/releases/tag/v0.1.0
