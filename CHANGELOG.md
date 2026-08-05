@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Single sign-on through an OpenID Connect provider.** Set `TC_OIDC_ISSUER`
+  and the three values beside it, and the login screen grows a "Sign in with …"
+  button. Endpoints come from the issuer's discovery document, so any conforming
+  provider works and nothing in the code names one. Leave it unset and the
+  server behaves exactly as before.
+
+  Accounts are created on first sign-in, taking their handle from the provider's
+  `preferred_username` and numbering it if it is taken. Identities are keyed on
+  the issuer and subject rather than on an email address, so there is no way to
+  claim an existing account by controlling an address — and no way to attach a
+  provider to an account that already has a password. Passwords keep working
+  alongside; pair it with `TC_OPEN_REGISTRATION=false` for a provider-only
+  workspace. Deactivating an account closes this route too.
+
 ## [0.2.0] — 2026-07-30
 
 First release published to crates.io, as `tensorchat-core`, `tensorchat-store`

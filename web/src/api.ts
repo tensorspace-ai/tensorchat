@@ -82,7 +82,19 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 type Session = { token: string; user: User };
 
+/**
+ * How this server lets people in, beyond a handle and a password.
+ *
+ * `oidc` is null when no provider is configured, which is the only thing that
+ * decides whether the sign-in button is drawn — the client never knows the
+ * issuer, the client id, or anything else about the provider.
+ */
+export type AuthProviders = { oidc: { label: string } | null };
+
 export const api = {
+  /** What sign-in methods exist. Readable without a session, by necessity. */
+  authProviders: () => request<AuthProviders>('GET', '/api/auth/providers'),
+
   /**
    * Create an account. `invite` admits the account even when open registration
    * is closed; without one the server refuses unless registration is open.

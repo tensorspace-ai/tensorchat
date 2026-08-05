@@ -175,7 +175,55 @@ All configuration is environment variables. Everything has a working default.
 | `TC_PUBLIC_URL` | *(unset)* | How people reach this server, e.g. `https://chat.example.com`. Used for links printed by `tensorchat invite`. |
 | `TC_PUSH_CONTACT` | `mailto:admin@localhost` | Contact address in VAPID tokens. Set to an empty string to disable Web Push. |
 | `TC_PERMISSIVE_CORS` | `false` | Development only. |
+| `TC_OIDC_ISSUER` | *(unset)* | Enables single sign-on. Issuer URL of an OpenID Connect provider — see below. |
+| `TC_OIDC_CLIENT_ID` | *(unset)* | Required when `TC_OIDC_ISSUER` is set. |
+| `TC_OIDC_CLIENT_SECRET` | *(unset)* | Required when `TC_OIDC_ISSUER` is set. |
+| `TC_OIDC_REDIRECT_URL` | *(unset)* | Required when `TC_OIDC_ISSUER` is set. Must match what the provider has registered, exactly. |
+| `TC_OIDC_SCOPES` | `openid profile` | Space-separated. Must include `openid`. |
+| `TC_OIDC_LABEL` | *(issuer host)* | What the sign-in button calls the provider. |
 | `RUST_LOG` | `tensorchat_server=info` | Log filter. |
+
+### Single sign-on
+
+Setting `TC_OIDC_ISSUER` adds a "Sign in with …" button beside the password
+form. Passwords keep working; pair it with `TC_OPEN_REGISTRATION=false` if the
+provider should be the only way to get an account.
+
+Any OpenID Connect provider works — the endpoints are read from the issuer's
+`/.well-known/openid-configuration`, and nothing in the code names a vendor.
+Register this server as a **confidential** client with an authorization-code
+grant, then:
+
+```sh
+export TC_OIDC_ISSUER=https://id.example.com
+export TC_OIDC_CLIENT_ID=...
+export TC_OIDC_CLIENT_SECRET=...
+export TC_OIDC_REDIRECT_URL=https://chat.example.com/api/oauth/callback
+tensorchat
+```
+
+The flow is an authorization code with PKCE. The redirect URL must be the one
+registered with the provider, character for character, or the provider will
+refuse the exchange.
+
+Accounts are created on first sign-in. The handle comes from the provider's
+`preferred_username`, reduced to the characters a handle may contain and
+numbered if it is already taken — `alice`, then `alice2`. Identities are keyed
+on the issuer and the subject, never on an email address: an address a provider
+lets someone set unverified, or releases and later reassigns, would otherwise
+be a way into an existing account. There is consequently no way to attach a
+provider to an account that already exists; that account signs in with its
+password.
+
+An account created this way has no password, and deactivating it closes the
+single-sign-on route too.
+
+`https` is required unless the issuer is a loopback address, which is the
+exception that lets you develop against a provider running on the same machine.
+The flow's confidentiality rests on TLS: the ID token's signature is not
+checked, because the subject is read directly from the provider's userinfo
+endpoint over an authenticated TLS connection, which OIDC Core §3.1.3.7 permits
+in place of verifying the token.
 
 ### Closing registration
 

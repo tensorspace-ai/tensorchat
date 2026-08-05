@@ -89,6 +89,14 @@ export function LoginScreen(onAuthenticated: (user: User) => void): HTMLElement 
 
   const inviteNote = el('p', { class: 'auth-invite' });
 
+  /**
+   * The "Sign in with …" button, once the server has said there is a provider.
+   *
+   * Built lazily rather than hidden, so a server without one renders exactly
+   * the form it rendered before this existed.
+   */
+  let providerButton: HTMLElement | null = null;
+
   function render(): void {
     const registering = mode === 'register';
     password.autocomplete = registering ? 'new-password' : 'current-password';
@@ -119,9 +127,38 @@ export function LoginScreen(onAuthenticated: (user: User) => void): HTMLElement 
       error,
       submit,
       toggle,
+      providerButton,
     ]);
     if (!submit.disabled) handle.focus();
   }
+
+  // Fire and forget, like the invite check above: if this never answers, the
+  // password form is still perfectly usable.
+  void api
+    .authProviders()
+    .then((p) => {
+      if (!p.oidc) return;
+      providerButton = el(
+        'div',
+        { class: 'auth-provider' },
+        el('div', { class: 'auth-or', text: 'or' }),
+        el('button', {
+          class: 'auth-provider-button',
+          type: 'button',
+          text: `Sign in with ${p.oidc.label}`,
+          on: {
+            // A full navigation, not a fetch. The provider answers with a
+            // redirect to its own login page, which an XHR cannot follow —
+            // and the CSP would not allow reaching it if it could.
+            click: () => location.assign('/api/oauth/start'),
+          },
+        }),
+      );
+      render();
+    })
+    .catch(() => {
+      // No providers, or no answer. Either way there is no button to draw.
+    });
 
   if (invite) {
     // Fire and forget: a failure here only downgrades the banner, and the

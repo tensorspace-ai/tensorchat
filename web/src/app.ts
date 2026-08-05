@@ -38,17 +38,20 @@ export function mount(root: HTMLElement): void {
     replace(root, [LoginScreen(() => start(root))]);
   };
 
-  if (!token) {
-    showLogin();
-    return;
-  }
-  // A stored token may be expired or revoked; verify before painting the app,
-  // otherwise the user sees a full UI that immediately fails every request.
+  // Ask the server even with no token stored. A sign-in through an identity
+  // provider comes back as a redirect carrying only the session *cookie* —
+  // there is no token for the callback to hand over, since putting one in the
+  // URL would write a live credential into the browser's history. So the
+  // absence of a stored token no longer means the absence of a session, and
+  // short-circuiting to the login screen would have shown it to somebody who
+  // had just finished signing in.
+  //
+  // For a first-time visitor this costs one 401 before the login screen.
   void api
     .me()
     .then(() => start(root))
     .catch(() => {
-      setToken(null);
+      if (token) setToken(null);
       showLogin();
     });
 }

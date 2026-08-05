@@ -2694,6 +2694,50 @@ dialog::backdrop {
   color: var(--accent-text);
 }
 
+/* Sign-in through an identity provider. Present only when the server has one
+   configured, so these rules go unused on most instances. */
+.auth-provider {
+  margin-top: 4px;
+}
+
+/* "or", with a rule through it, separating the password form from the
+   provider button. The lines are borders on the pseudo-elements rather than a
+   background image, so they follow the theme's divider colour. */
+.auth-or {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.auth-or::before,
+.auth-or::after {
+  content: '';
+  flex: 1;
+  border-top: 1px solid var(--border);
+}
+
+/* Outlined rather than filled: the password form's own submit is the primary
+   action, and two solid buttons would compete. */
+.auth-provider-button {
+  width: 100%;
+  padding: 11px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  text-align: center;
+  transition: background var(--speed) var(--ease), border-color var(--speed) var(--ease);
+}
+
+.auth-provider-button:hover {
+  background: var(--hover);
+  border-color: var(--border-strong);
+}
+
 
 /* ── 17. Responsive ────────────────────────────────────────────────── */
 
